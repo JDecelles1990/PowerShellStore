@@ -55,3 +55,27 @@ def test_production_scripts_parameter_injection():
     assert "$Port = 80" in port_rmm
     assert "$TimeoutMs = 1500" in port_rmm
 
+    # 4. Get-OSInformation
+    os_rmm = clipboard.get_rmm_ready_script(
+        "01_System/Get-OSInformation.ps1",
+        {"Detailed": False},
+    )
+    assert "$Detailed = $false" in os_rmm
+
+    # 5. Update-Windows
+    wu_rmm = clipboard.get_rmm_ready_script(
+        "01_System/Update-Windows.ps1",
+        {"ScanOnly": True, "AutoReboot": True, "MaxUpdates": 10},
+    )
+    assert "$ScanOnly = $true" in wu_rmm
+    assert "$AutoReboot = $true" in wu_rmm
+    assert "$MaxUpdates = 10" in wu_rmm
+
+    # 6. Clear-OutlookCache
+    outlook_rmm = clipboard.get_rmm_ready_script(
+        "03_M365/Clear-OutlookCache.ps1",
+        {"CloseOutlook": False, "PreserveAutoComplete": False},
+    )
+    assert "$CloseOutlook = $false" in outlook_rmm
+    assert "$PreserveAutoComplete = $false" in outlook_rmm
+

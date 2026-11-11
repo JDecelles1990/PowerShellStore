@@ -103,3 +103,4 @@ Every script under `scripts/` includes a structured header:
 
 ## 📄 License
 MIT License. Built for IT professionals and MSPs.
+
