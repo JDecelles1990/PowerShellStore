@@ -79,3 +79,45 @@ def test_production_scripts_parameter_injection():
     assert "$CloseOutlook = $false" in outlook_rmm
     assert "$PreserveAutoComplete = $false" in outlook_rmm
 
+    # 7. BatteryHealthReport
+    bat_rmm = clipboard.get_rmm_ready_script(
+        "01_System/Get-BatteryHealthReport.ps1",
+        {"WearThresholdPercent": 40},
+    )
+    assert "$WearThresholdPercent = 40" in bat_rmm
+
+    # 8. Reset-NetworkStack
+    net_rmm = clipboard.get_rmm_ready_script(
+        "02_Network/Reset-NetworkStack.ps1",
+        {"FlushDNS": False, "ResetWinsock": False},
+    )
+    assert "$FlushDNS = $false" in net_rmm
+    assert "$ResetWinsock = $false" in net_rmm
+
+    # 9. Test-NetworkQuality
+    qual_rmm = clipboard.get_rmm_ready_script(
+        "02_Network/Test-NetworkQuality.ps1",
+        {"TargetHost": "8.8.8.8", "PingCount": 25},
+    )
+    assert "$TargetHost = '8.8.8.8'" in qual_rmm
+    assert "$PingCount = 25" in qual_rmm
+
+    # 10. Reset-OneDriveSync
+    od_rmm = clipboard.get_rmm_ready_script(
+        "03_M365/Reset-OneDriveSync.ps1",
+        {"KillRunningProcess": False, "RelaunchOneDrive": False},
+    )
+    assert "$KillRunningProcess = $false" in od_rmm
+    assert "$RelaunchOneDrive = $false" in od_rmm
+
+
+def test_script_contract_linter():
+    """Ensures all production scripts pass the static contract linter."""
+    from tools.lint_scripts import run_linter
+    scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+    results = run_linter(scripts_dir)
+    assert len(results) >= 26
+
+    failed = [r for r in results if not r.passed]
+    assert len(failed) == 0, f"Scripts failed linter contract: {[(f.relative_path, f.errors) for f in failed]}"
+
