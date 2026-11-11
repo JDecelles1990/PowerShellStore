@@ -110,13 +110,37 @@ def test_production_scripts_parameter_injection():
     assert "$KillRunningProcess = $false" in od_rmm
     assert "$RelaunchOneDrive = $false" in od_rmm
 
+    # 11. Get-HighResourceProcesses
+    proc_rmm = clipboard.get_rmm_ready_script(
+        "01_System/Get-HighResourceProcesses.ps1",
+        {"SortBy": "Memory", "TopCount": 25},
+    )
+    assert "$SortBy = 'Memory'" in proc_rmm
+    assert "$TopCount = 25" in proc_rmm
+
+    # 12. Get-RecentEventErrors
+    evt_rmm = clipboard.get_rmm_ready_script(
+        "01_System/Get-RecentEventErrors.ps1",
+        {"HoursBack": 48, "MaxEvents": 50},
+    )
+    assert "$HoursBack = 48" in evt_rmm
+    assert "$MaxEvents = 50" in evt_rmm
+
+    # 13. Get-ListeningPorts
+    port_list_rmm = clipboard.get_rmm_ready_script(
+        "02_Network/Get-ListeningPorts.ps1",
+        {"Protocol": "TCP", "PortFilter": 443},
+    )
+    assert "$Protocol = 'TCP'" in port_list_rmm
+    assert "$PortFilter = 443" in port_list_rmm
+
 
 def test_script_contract_linter():
     """Ensures all production scripts pass the static contract linter."""
     from tools.lint_scripts import run_linter
     scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
     results = run_linter(scripts_dir)
-    assert len(results) >= 26
+    assert len(results) >= 38
 
     failed = [r for r in results if not r.passed]
     assert len(failed) == 0, f"Scripts failed linter contract: {[(f.relative_path, f.errors) for f in failed]}"
