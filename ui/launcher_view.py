@@ -4,25 +4,39 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QFileSystemWatcher, Qt
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QFont,
+    QIcon,
+    QKeySequence,
+    QPainter,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QSlider,
     QSplitter,
     QStatusBar,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
 
 from repositories.catalog_repo import CatalogRepo, ScriptRecord
 from services.clipboard_service import ClipboardService
+from services.hotkey_service import GlobalHotkeyManager, bring_window_to_foreground
 from services.runner import RunResult, ScriptRunner, is_running_as_admin
 from services.scanner import ScriptScanner
+from services.startup_service import StartupService
 from ui.catalog_table_view import CatalogTableView
 from ui.console_view import ConsoleView
 from ui.parameter_form import ParameterFormWidget
@@ -38,6 +52,8 @@ class LauncherView(QMainWindow):
         scanner: ScriptScanner | None = None,
         clipboard_service: ClipboardService | None = None,
         runner: ScriptRunner | None = None,
+        startup_service: StartupService | None = None,
+        hotkey_manager: GlobalHotkeyManager | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -51,14 +67,29 @@ class LauncherView(QMainWindow):
             clipboard_service if clipboard_service is not None else ClipboardService()
         )
         self.runner = runner if runner is not None else ScriptRunner(repo=self.repo)
+        self.startup_service = (
+            startup_service if startup_service is not None else StartupService()
+        )
+        self.hotkey_manager = (
+            hotkey_manager if hotkey_manager is not None else GlobalHotkeyManager(parent=self)
+        )
 
         self._current_script: ScriptRecord | None = None
         self._sidebar_expanded: bool = True
+        self._force_quit: bool = False
+
+        # Set application and window icon
+        self.app_icon = self._create_app_icon()
+        self.setWindowIcon(self.app_icon)
 
         self._init_ui()
         self._init_shortcuts()
+        self._init_tray_icon()
         self._init_watcher()
         self._connect_signals()
+
+        # Sync startup checkbox with Windows registry state
+        self.sidebar.set_startup_checked(self.startup_service.is_startup_enabled())
 
         # Initial catalog sync
         self.sync_and_refresh()
@@ -103,6 +134,12 @@ class LauncherView(QMainWindow):
         # Ctrl+B toggles sidebar collapse/expand
         self.shortcut_sidebar = QShortcut(QKeySequence("Ctrl+B"), self)
         self.shortcut_sidebar.activated.connect(self.toggle_sidebar)
+
+        # Register system-wide Shift+F8 hotkey
+        try:
+            self.hotkey_manager.register(int(self.winId()))
+        except Exception as exc:
+            logger.warning("Could not register global Shift+F8 hotkey: %s", exc)
 
     def _init_inspector_ui(self) -> None:
         layout = QVBoxLayout(self.inspector_frame)
@@ -236,8 +273,12 @@ class LauncherView(QMainWindow):
         # Sidebar & Filter signals
         self.sidebar.filter_changed.connect(self._on_filters_changed)
         self.sidebar.sync_requested.connect(self.sync_and_refresh)
+        self.sidebar.startup_toggled.connect(self._on_sidebar_startup_toggled)
         self.catalog_view.toggle_sidebar_requested.connect(self.toggle_sidebar)
         self.catalog_view.script_selected.connect(self._on_script_selected)
+
+        # Global Hotkey signal (Shift+F8)
+        self.hotkey_manager.triggered.connect(self.toggle_window_visibility)
 
         # Runner signals
         self.runner.started.connect(self._on_run_started)
@@ -423,3 +464,127 @@ class LauncherView(QMainWindow):
         self.stop_btn.setEnabled(False)
         QMessageBox.critical(self, "Execution Error", message)
         self.status_bar.showMessage(f"Execution Error: {message}", 5000)
+
+    # -------------------------------------------------------------------------
+    # Tray Icon, Global Hotkey (Shift+F8), and Startup Handlers
+    # -------------------------------------------------------------------------
+
+    def _create_app_icon(self) -> QIcon:
+        """Draws a crisp dark-blue badge with a terminal prompt symbol (>_) for window and tray icon."""
+        pixmap = QPixmap(64, 64)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor("#2563eb"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(4, 4, 56, 56, 12, 12)
+        painter.setPen(QColor("#ffffff"))
+        font = QFont("Consolas", 22, QFont.Weight.Bold)
+        painter.setFont(font)
+        painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, ">_")
+        painter.end()
+        return QIcon(pixmap)
+
+    def _init_tray_icon(self) -> None:
+        """Initializes the Windows notification area (System Tray) icon and context menu."""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.info("System tray is not available on this platform.")
+            return
+
+        self.tray_icon = QSystemTrayIcon(self.app_icon, self)
+        self.tray_icon.setToolTip("PowerShellStore — Press Shift+F8 to Open")
+
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background-color: #1f2937; color: #f3f4f6; border: 1px solid #374151; padding: 4px; } "
+            "QMenu::item { padding: 6px 20px; } "
+            "QMenu::item:selected { background-color: #2563eb; border-radius: 4px; } "
+            "QMenu::separator { height: 1px; background-color: #374151; margin: 4px 0px; }"
+        )
+
+        self.action_tray_toggle = QAction("Show / Hide PowerShellStore (Shift+F8)", self)
+        font = self.action_tray_toggle.font()
+        font.setBold(True)
+        self.action_tray_toggle.setFont(font)
+        self.action_tray_toggle.triggered.connect(self.toggle_window_visibility)
+        menu.addAction(self.action_tray_toggle)
+
+        self.action_tray_startup = QAction("Start at Windows Startup", self)
+        self.action_tray_startup.setCheckable(True)
+        self.action_tray_startup.setChecked(self.startup_service.is_startup_enabled())
+        self.action_tray_startup.toggled.connect(self._on_tray_startup_toggled)
+        menu.addAction(self.action_tray_startup)
+
+        menu.addSeparator()
+
+        action_quit = QAction("Exit PowerShellStore", self)
+        action_quit.triggered.connect(self.quit_application)
+        menu.addAction(action_quit)
+
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        ):
+            self.toggle_window_visibility()
+
+    def _on_sidebar_startup_toggled(self, enabled: bool) -> None:
+        success = self.startup_service.toggle_startup(enabled)
+        if hasattr(self, "action_tray_startup"):
+            self.action_tray_startup.blockSignals(True)
+            self.action_tray_startup.setChecked(self.startup_service.is_startup_enabled())
+            self.action_tray_startup.blockSignals(False)
+        state_str = "enabled" if enabled else "disabled"
+        status_msg = f"Windows startup {state_str}." if success else "Failed to update Windows startup registry."
+        self.status_bar.showMessage(status_msg, 3000)
+
+    def _on_tray_startup_toggled(self, enabled: bool) -> None:
+        success = self.startup_service.toggle_startup(enabled)
+        self.sidebar.set_startup_checked(self.startup_service.is_startup_enabled())
+        state_str = "enabled" if enabled else "disabled"
+        status_msg = f"Windows startup {state_str}." if success else "Failed to update Windows startup registry."
+        self.status_bar.showMessage(status_msg, 3000)
+
+    def toggle_window_visibility(self) -> None:
+        """Toggles the window between foreground active and minimized/hidden."""
+        if self.isHidden() or self.isMinimized() or not self.isActiveWindow():
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            bring_window_to_foreground(int(self.winId()))
+        else:
+            self.hide()
+
+    def closeEvent(self, event) -> None:
+        """Intercepts window close: minimizes to system tray unless force quit is invoked."""
+        if self._force_quit or not hasattr(self, "tray_icon") or not self.tray_icon.isVisible():
+            self.hotkey_manager.unregister()
+            event.accept()
+        else:
+            event.ignore()
+            self.hide()
+            try:
+                if self.tray_icon.supportsMessages():
+                    self.tray_icon.showMessage(
+                        "PowerShellStore",
+                        "Application minimized to system tray. Press Shift+F8 anytime to open.",
+                        QSystemTrayIcon.MessageIcon.Information,
+                        2000,
+                    )
+            except Exception:
+                pass
+
+    def quit_application(self) -> None:
+        """Completely terminates the application and unregisters global hooks."""
+        self._force_quit = True
+        self.hotkey_manager.unregister()
+        if hasattr(self, "tray_icon"):
+            self.tray_icon.hide()
+        self.close()
+        app = QApplication.instance()
+        if app:
+            app.quit()

@@ -4,6 +4,7 @@ from typing import Any
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 class SidebarView(QFrame):
     filter_changed = Signal(str, str, str, str)  # category, search, risk, edition
     sync_requested = Signal()
+    startup_toggled = Signal(bool)
 
     def __init__(self, parent: QFrame | None = None) -> None:
         super().__init__(parent)
@@ -89,6 +91,41 @@ class SidebarView(QFrame):
         self.sync_button = QPushButton("🔄 Sync Catalog")
         self.sync_button.clicked.connect(self.sync_requested.emit)
         layout.addWidget(self.sync_button)
+
+        # Integration & Shortcuts
+        int_label = QLabel("STARTUP & SHORTCUTS")
+        int_label.setObjectName("SectionTitle")
+        layout.addWidget(int_label)
+
+        self.startup_checkbox = QCheckBox("Start with Windows")
+        self.startup_checkbox.setToolTip("Automatically launch PowerShellStore on Windows login")
+        self.startup_checkbox.toggled.connect(self.startup_toggled.emit)
+        layout.addWidget(self.startup_checkbox)
+
+        # Shift+F8 Hotkey Indicator Badge
+        hotkey_box = QFrame()
+        hotkey_box.setStyleSheet(
+            "background-color: #111827; border: 1px solid #374151; "
+            "border-radius: 4px; padding: 4px 6px;"
+        )
+        hotkey_layout = QHBoxLayout(hotkey_box)
+        hotkey_layout.setContentsMargins(4, 2, 4, 2)
+        hotkey_layout.setSpacing(6)
+
+        hotkey_icon = QLabel("⚡")
+        hotkey_icon.setStyleSheet("font-size: 11px;")
+        hotkey_layout.addWidget(hotkey_icon)
+
+        hotkey_text = QLabel("Hotkey: Shift+F8")
+        hotkey_text.setStyleSheet("color: #60a5fa; font-size: 11px; font-weight: bold; font-family: Consolas, monospace;")
+        hotkey_layout.addWidget(hotkey_text, 1)
+        layout.addWidget(hotkey_box)
+
+    def set_startup_checked(self, enabled: bool) -> None:
+        """Sets the startup checkbox state without emitting signals."""
+        self.startup_checkbox.blockSignals(True)
+        self.startup_checkbox.setChecked(enabled)
+        self.startup_checkbox.blockSignals(False)
 
     def update_categories(self, categories: list[dict[str, Any]], total_count: int) -> None:
         self.category_list.clear()
