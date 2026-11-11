@@ -104,3 +104,4 @@ class StartupService:
     def toggle_startup(self, enable: bool, argument: str = "--startup") -> bool:
         """Toggles startup registration based on the boolean flag."""
         return self.enable_startup(argument) if enable else self.disable_startup()
+

@@ -55,6 +55,8 @@ class RunResult:
     errors: list[str] = field(default_factory=list)
     raw_output: str = ""
     raw_json: str = ""
+    script_title: str = ""
+    script_category: str = ""
 
 
 class ScriptRunner(QObject):
@@ -212,6 +214,8 @@ class ScriptRunner(QObject):
         duration_ms: int,
     ) -> RunResult:
         script_id = self._current_script.id if self._current_script and self._current_script.id else 0
+        script_title = self._current_script.title if self._current_script else ""
+        script_category = self._current_script.category if self._current_script else ""
         raw_output = (stdout + ("\n" + stderr if stderr else "")).strip()
 
         if self._is_timed_out:
@@ -223,6 +227,8 @@ class ScriptRunner(QObject):
                 summary="Execution timed out and was killed.",
                 errors=["Process timed out."],
                 raw_output=raw_output,
+                script_title=script_title,
+                script_category=script_category,
             )
 
         # Attempt to parse standard JSON envelope from stdout
@@ -270,6 +276,8 @@ class ScriptRunner(QObject):
                 errors=errors if isinstance(errors, list) else [str(errors)],
                 raw_output=raw_output,
                 raw_json=json_payload_str,
+                script_title=script_title,
+                script_category=script_category,
             )
 
         # Fallback to standard RMM / console text output parsing
@@ -311,6 +319,8 @@ class ScriptRunner(QObject):
             errors=errors_list,
             raw_output=raw_output,
             raw_json="",
+            script_title=script_title,
+            script_category=script_category,
         )
 
     def _on_process_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:

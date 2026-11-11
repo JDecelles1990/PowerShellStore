@@ -133,6 +133,30 @@ QPushButton#DangerButton:hover {
     background-color: #b91c1c;
 }
 
+/* Report Action Buttons (Dark Slate with Blue Accent on Hover) */
+QPushButton#ReportButton {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    color: #e5e7eb;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+QPushButton#ReportButton:hover {
+    background-color: #374151;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+QPushButton#ReportButton:pressed {
+    background-color: #111827;
+}
+QPushButton#ReportButton:disabled {
+    background-color: #111827;
+    border-color: #1f2937;
+    color: #4b5563;
+}
+
 /* Tables and Lists */
 QTableWidget, QListWidget {
     background-color: #111827;

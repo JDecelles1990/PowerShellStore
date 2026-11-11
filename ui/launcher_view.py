@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from repositories.catalog_repo import CatalogRepo, ScriptRecord
 from services.clipboard_service import ClipboardService
 from services.hotkey_service import GlobalHotkeyManager, bring_window_to_foreground
+from services.report_service import ReportService
 from services.runner import RunResult, ScriptRunner, is_running_as_admin
 from services.scanner import ScriptScanner
 from services.startup_service import StartupService
@@ -54,6 +55,7 @@ class LauncherView(QMainWindow):
         runner: ScriptRunner | None = None,
         startup_service: StartupService | None = None,
         hotkey_manager: GlobalHotkeyManager | None = None,
+        report_service: ReportService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -72,6 +74,9 @@ class LauncherView(QMainWindow):
         )
         self.hotkey_manager = (
             hotkey_manager if hotkey_manager is not None else GlobalHotkeyManager(parent=self)
+        )
+        self.report_service = (
+            report_service if report_service is not None else ReportService()
         )
 
         self._current_script: ScriptRecord | None = None
@@ -249,7 +254,7 @@ class LauncherView(QMainWindow):
         layout.addLayout(action_bar)
 
         # Workstation Tabs (Results, Raw Console, Source Code, Run History)
-        self.console_view = ConsoleView()
+        self.console_view = ConsoleView(report_service=self.report_service)
         layout.addWidget(self.console_view, 1)
 
     def _init_watcher(self) -> None:
@@ -279,6 +284,9 @@ class LauncherView(QMainWindow):
 
         # Global Hotkey signal (Shift+F8)
         self.hotkey_manager.triggered.connect(self.toggle_window_visibility)
+
+        # Console and Report signals
+        self.console_view.status_message_requested.connect(self.status_bar.showMessage)
 
         # Runner signals
         self.runner.started.connect(self._on_run_started)
@@ -356,6 +364,9 @@ class LauncherView(QMainWindow):
         self.timeout_chip.setText(f"{script.timeout_seconds}s Timeout")
 
         self.synopsis_label.setText(script.synopsis or "No synopsis available.")
+
+        # Update active script context for reporting
+        self.console_view.set_script_context(script.title, script.category)
 
         # Load parameters form
         self.param_form.load_script(script)
@@ -447,7 +458,11 @@ class LauncherView(QMainWindow):
     def _on_run_finished(self, result: RunResult) -> None:
         self.run_local_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.console_view.display_run_result(result)
+        self.console_view.display_run_result(
+            result,
+            script_title=self._current_script.title if self._current_script else "",
+            script_category=self._current_script.category if self._current_script else "",
+        )
 
         # Refresh history tab
         if self._current_script and self._current_script.id:

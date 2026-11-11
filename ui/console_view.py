@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTabWidget,
@@ -19,12 +23,23 @@ from PySide6.QtWidgets import (
 )
 
 from repositories.catalog_repo import RunHistoryRecord
+from services.report_service import ReportService
 from services.runner import RunResult
 
 
 class ConsoleView(QTabWidget):
-    def __init__(self, parent: QWidget | None = None) -> None:
+    status_message_requested = Signal(str, int)
+
+    def __init__(
+        self,
+        report_service: ReportService | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.report_service = report_service if report_service is not None else ReportService()
+        self._current_result: RunResult | None = None
+        self._current_script_title: str = ""
+        self._current_script_category: str = ""
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -70,6 +85,23 @@ class ConsoleView(QTabWidget):
         self.exit_code_label.setStyleSheet("color: #9ca3af; font-size: 12px;")
         metrics_bar.addWidget(self.exit_code_label)
         metrics_bar.addStretch()
+
+        # Ticket Reporting Action Buttons
+        self.copy_report_btn = QPushButton("📋 Copy Ticket Report")
+        self.copy_report_btn.setObjectName("ReportButton")
+        self.copy_report_btn.setToolTip(
+            "Copies formatted rich-text ticket report with audit header and structured evidence to Windows Clipboard"
+        )
+        self.copy_report_btn.setEnabled(False)
+        self.copy_report_btn.clicked.connect(self._on_copy_report_clicked)
+        metrics_bar.addWidget(self.copy_report_btn)
+
+        self.save_report_btn = QPushButton("💾 Save Report...")
+        self.save_report_btn.setObjectName("ReportButton")
+        self.save_report_btn.setToolTip("Exports self-contained HTML audit report to disk")
+        self.save_report_btn.setEnabled(False)
+        self.save_report_btn.clicked.connect(self._on_save_report_clicked)
+        metrics_bar.addWidget(self.save_report_btn)
 
         layout.addLayout(metrics_bar)
 
@@ -169,6 +201,12 @@ class ConsoleView(QTabWidget):
         self.history_table.cellDoubleClicked.connect(self._on_history_double_clicked)
         layout.addWidget(self.history_table, 1)
 
+    def set_script_context(self, title: str, category: str = "") -> None:
+        """Stores the active script context for audit report generation."""
+        self._current_script_title = title
+        if category:
+            self._current_script_category = category
+
     def set_script_source(self, code: str) -> None:
         self.code_preview.setPlainText(code)
 
@@ -180,7 +218,27 @@ class ConsoleView(QTabWidget):
         self.raw_console.insertPlainText(text)
         self.raw_console.moveCursor(self.raw_console.textCursor().MoveOperation.End)
 
-    def display_run_result(self, result: RunResult) -> None:
+    def display_run_result(
+        self,
+        result: RunResult,
+        script_title: str = "",
+        script_category: str = "",
+    ) -> None:
+        self._current_result = result
+        if script_title:
+            self._current_script_title = script_title
+        elif result.script_title:
+            self._current_script_title = result.script_title
+
+        if script_category:
+            self._current_script_category = script_category
+        elif result.script_category:
+            self._current_script_category = result.script_category
+
+        # Enable reporting buttons
+        self.copy_report_btn.setEnabled(True)
+        self.save_report_btn.setEnabled(True)
+
         # Update Status Badge
         status_colors = {
             "pass": ("#065f46", "#34d399", "PASS"),
@@ -255,6 +313,57 @@ class ConsoleView(QTabWidget):
         # Switch to Results tab
         self.setCurrentIndex(0)
 
+    def _on_copy_report_clicked(self) -> None:
+        if not self._current_result:
+            return
+        title = self._current_script_title or self._current_result.script_title or "PowerShell Execution"
+        category = self._current_script_category or self._current_result.script_category or "System"
+        success = self.report_service.copy_ticket_report_to_clipboard(
+            script_title=title,
+            result=self._current_result,
+            script_category=category,
+        )
+        if success:
+            orig_text = self.copy_report_btn.text()
+            self.copy_report_btn.setText("✓ Report Copied!")
+            QTimer.singleShot(2000, lambda: self.copy_report_btn.setText(orig_text))
+            self.status_message_requested.emit(
+                "📋 Copied Rich-Text Ticket Report (HTML + Markdown) to Windows Clipboard!",
+                4000,
+            )
+
+    def _on_save_report_clicked(self) -> None:
+        if not self._current_result:
+            return
+        title = self._current_script_title or self._current_result.script_title or "execution_report"
+        category = self._current_script_category or self._current_result.script_category or "System"
+        slug = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in title).strip("_")
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"Report_{slug}_{now_str}.html"
+        default_dir = Path.home() / "Documents"
+        if not default_dir.exists():
+            default_dir = Path.home()
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Execution Report",
+            str(default_dir / default_name),
+            "HTML Files (*.html);;All Files (*)",
+        )
+        if file_path:
+            try:
+                saved_path = self.report_service.save_html_report(
+                    file_path=file_path,
+                    script_title=title,
+                    result=self._current_result,
+                    script_category=category,
+                )
+                self.status_message_requested.emit(
+                    f"💾 Saved HTML Ticket Report to {saved_path.name}!",
+                    5000,
+                )
+            except Exception as e:
+                QMessageBox.critical(self, "Export Failed", f"Failed to save report: {e}")
+
     def display_history(self, records: list[RunHistoryRecord]) -> None:
         self._history_records = records
         self.history_table.setRowCount(len(records))
@@ -300,6 +409,8 @@ class ConsoleView(QTabWidget):
                 errors=errors if isinstance(errors, list) else [str(errors)],
                 raw_output=rec.raw_output,
                 raw_json=rec.json_payload,
+                script_title=self._current_script_title,
+                script_category=self._current_script_category,
             )
             self.display_run_result(hist_result)
             self.raw_console.setPlainText(rec.raw_output)
