@@ -94,3 +94,4 @@ catch {
     $errPayload | ConvertTo-Json -Depth 4 -Compress
     exit 1
 }
+
