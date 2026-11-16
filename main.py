@@ -9,6 +9,7 @@ from pathlib import Path
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
+from ui.effects import install_button_fx
 from ui.launcher_view import LauncherView
 from ui.styles import DARK_THEME_QSS
 
@@ -32,6 +33,9 @@ def main() -> None:
 
     # Apply global Dark Mode QSS stylesheet
     app.setStyleSheet(DARK_THEME_QSS)
+
+    # Rainbow glow, shine sweep and click ripple on every push button (incl. dialogs)
+    install_button_fx(app)
 
     # Detect startup / background launch arguments
     start_hidden = any(arg in sys.argv for arg in ("--startup", "--minimized", "--tray"))

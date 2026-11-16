@@ -40,6 +40,7 @@ from services.scanner import ScriptScanner
 from services.startup_service import StartupService
 from ui.catalog_table_view import CatalogTableView
 from ui.console_view import ConsoleView
+from ui.effects import install_item_view_glow_recursive
 from ui.parameter_form import ParameterFormWidget
 from ui.sidebar_view import SidebarView
 
@@ -88,6 +89,8 @@ class LauncherView(QMainWindow):
         self.setWindowIcon(self.app_icon)
 
         self._init_ui()
+        # Glowing gradient hover + click ripple on list/table rows (categories, catalog, history, results)
+        self.item_view_glow = install_item_view_glow_recursive(self)
         self._init_shortcuts()
         self._init_tray_icon()
         self._init_watcher()

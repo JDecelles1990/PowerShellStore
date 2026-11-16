@@ -81,7 +81,8 @@ QComboBox QAbstractItemView {
     color: #f9fafb;
 }
 
-/* Push Buttons */
+/* Push Buttons — colorful gradient on hover, inverted "pressed-in" gradient on click.
+   The animated rainbow glow, shine sweep and click ripple are painted by ui/effects.py. */
 QPushButton {
     background-color: #374151;
     color: #f9fafb;
@@ -91,13 +92,25 @@ QPushButton {
     font-weight: 500;
 }
 QPushButton:hover {
-    background-color: #4b5563;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #6366f1, stop:0.35 #8b5cf6, stop:0.7 #ec4899, stop:1 #f59e0b);
+    border: 1px solid #f0abfc;
+    color: #ffffff;
 }
 QPushButton:pressed {
+    background-color: qlineargradient(x1:1, y1:1, x2:0, y2:0,
+        stop:0 #4338ca, stop:0.5 #7e22ce, stop:1 #be185d);
+    border: 1px solid #ffffff;
+    padding-top: 8px;
+    padding-bottom: 6px;
+}
+QPushButton:disabled {
     background-color: #1f2937;
+    border: 1px solid #374151;
+    color: #6b7280;
 }
 
-/* Primary Action Button (Blue) */
+/* Primary Action Button (Blue -> Cyan -> Violet) */
 QPushButton#PrimaryButton {
     background-color: #2563eb;
     border: 1px solid #1d4ed8;
@@ -105,13 +118,17 @@ QPushButton#PrimaryButton {
     font-weight: 600;
 }
 QPushButton#PrimaryButton:hover {
-    background-color: #1d4ed8;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #06b6d4, stop:0.45 #3b82f6, stop:1 #a855f7);
+    border: 1px solid #a5f3fc;
 }
 QPushButton#PrimaryButton:pressed {
-    background-color: #1e40af;
+    background-color: qlineargradient(x1:1, y1:1, x2:0, y2:0,
+        stop:0 #0e7490, stop:0.5 #1d4ed8, stop:1 #7e22ce);
+    border: 1px solid #ffffff;
 }
 
-/* Success Button (Green) */
+/* Success Button (Emerald -> Lime -> Teal) */
 QPushButton#SuccessButton {
     background-color: #059669;
     border: 1px solid #047857;
@@ -119,10 +136,17 @@ QPushButton#SuccessButton {
     font-weight: 600;
 }
 QPushButton#SuccessButton:hover {
-    background-color: #047857;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #10b981, stop:0.5 #84cc16, stop:1 #14b8a6);
+    border: 1px solid #bbf7d0;
+}
+QPushButton#SuccessButton:pressed {
+    background-color: qlineargradient(x1:1, y1:1, x2:0, y2:0,
+        stop:0 #047857, stop:0.5 #4d7c0f, stop:1 #0f766e);
+    border: 1px solid #ffffff;
 }
 
-/* Danger / Stop Button (Red) */
+/* Danger / Stop Button (Red -> Orange -> Magenta) */
 QPushButton#DangerButton {
     background-color: #dc2626;
     border: 1px solid #b91c1c;
@@ -130,10 +154,22 @@ QPushButton#DangerButton {
     font-weight: 600;
 }
 QPushButton#DangerButton:hover {
-    background-color: #b91c1c;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #ef4444, stop:0.5 #f97316, stop:1 #db2777);
+    border: 1px solid #fecaca;
+}
+QPushButton#DangerButton:pressed {
+    background-color: qlineargradient(x1:1, y1:1, x2:0, y2:0,
+        stop:0 #991b1b, stop:0.5 #c2410c, stop:1 #9d174d);
+    border: 1px solid #ffffff;
+}
+QPushButton#PrimaryButton:disabled, QPushButton#SuccessButton:disabled, QPushButton#DangerButton:disabled {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    color: #6b7280;
 }
 
-/* Report Action Buttons (Dark Slate with Blue Accent on Hover) */
+/* Report Action Buttons (Dark Slate -> Aurora gradient on hover) */
 QPushButton#ReportButton {
     background-color: #1f2937;
     border: 1px solid #374151;
@@ -144,12 +180,15 @@ QPushButton#ReportButton {
     font-weight: 500;
 }
 QPushButton#ReportButton:hover {
-    background-color: #374151;
-    border-color: #3b82f6;
+    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #3b82f6, stop:0.5 #8b5cf6, stop:1 #ec4899);
+    border: 1px solid #c4b5fd;
     color: #ffffff;
 }
 QPushButton#ReportButton:pressed {
-    background-color: #111827;
+    background-color: qlineargradient(x1:1, y1:0, x2:0, y2:0,
+        stop:0 #1d4ed8, stop:0.5 #6d28d9, stop:1 #be185d);
+    border: 1px solid #ffffff;
 }
 QPushButton#ReportButton:disabled {
     background-color: #111827;
