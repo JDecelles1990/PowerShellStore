@@ -80,6 +80,13 @@ try {
         "Found $count member(s) in the local Administrators group."
     }
 
+    # Human-readable table before JSON envelope
+    if ($count -gt 0) {
+        $tableOutput = $membersList | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
+    }
+
     $payload = @{
         status  = $status
         summary = $summary

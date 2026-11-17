@@ -230,6 +230,11 @@ try {
         MegabytesFreed            = $freedMB
         ActionsLog                = ($actions -join " | ")
     })
+
+    # Human-readable table first for RMM and Console
+    $tableOutput = $results | Format-Table -Property OutlookClosed, AttachmentTempCleared, RoamCacheCleared, AutoCompletePreserved, TotalFilesDeleted, MegabytesFreed -AutoSize | Out-String -Width 4096
+    Write-Output $tableOutput.Trim()
+    Write-Output ""
 }
 catch {
     $status = "error"

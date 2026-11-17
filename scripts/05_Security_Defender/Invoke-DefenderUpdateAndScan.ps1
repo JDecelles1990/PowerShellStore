@@ -69,6 +69,9 @@ try {
     }
 
     # 2. Trigger Scan
+    if ($ScanType -notmatch '^(QuickScan|FullScan)$') {
+        $ScanType = "QuickScan"
+    }
     $scanTriggered = $false
     $scanCode = if ($ScanType -eq "FullScan") { 2 } else { 1 }
 
@@ -97,7 +100,7 @@ try {
                 }
             }
             catch {
-                $errors.Add("Failed to initiate $ScanType: $($_.Exception.Message)")
+                $errors.Add("Failed to initiate ${ScanType}: $($_.Exception.Message)")
                 $scanRecords.Add([PSCustomObject]@{
                     Stage   = "Antivirus Scan"
                     Status  = "Failed"

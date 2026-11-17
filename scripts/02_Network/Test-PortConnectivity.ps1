@@ -30,19 +30,32 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
+    $Port = [math]::Max(1, [math]::Min(65535, $Port))
+    $TimeoutMs = [math]::Max(500, [math]::Min(15000, $TimeoutMs))
+
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $tcpClient = New-Object System.Net.Sockets.TcpClient
-    $asyncResult = $tcpClient.BeginConnect($TargetHost, $Port, $null, $null)
-    $success = $asyncResult.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
-    $stopwatch.Stop()
-
     $connected = $false
-    if ($success -and $tcpClient.Connected) {
-        $tcpClient.EndConnect($asyncResult)
-        $connected = $true
+
+    try {
+        $asyncResult = $tcpClient.BeginConnect($TargetHost, $Port, $null, $null)
+        $success = $asyncResult.AsyncWaitHandle.WaitOne($TimeoutMs, $false)
+        $stopwatch.Stop()
+
+        if ($success -and $tcpClient.Connected) {
+            $tcpClient.EndConnect($asyncResult)
+            $connected = $true
+        }
     }
-    $tcpClient.Close()
+    finally {
+        $tcpClient.Close()
+    }
 
     $status = if ($connected) { "pass" } else { "fail" }
     $summary = if ($connected) {
@@ -51,31 +64,34 @@ try {
         "Connection to ${TargetHost}:${Port} timed out or was refused after $($stopwatch.ElapsedMilliseconds) ms."
     }
 
-    $result = [PSCustomObject]@{
+    $results.Add([PSCustomObject]@{
         TargetHost        = $TargetHost
         Port              = $Port
         Connected         = $connected
         ResponseTimeMs    = $stopwatch.ElapsedMilliseconds
         TimeoutConfigured = $TimeoutMs
+    })
+
+    if (-not $connected) {
+        $errors.Add("Port $Port unreachable on $TargetHost")
     }
 
-    $errList = if (-not $connected) { @("Port $Port unreachable on $TargetHost") } else { @() }
-
+    # Human-readable table before JSON envelope
+    $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+    Write-Output $tableOutput.Trim()
+    Write-Output ""
+}
+catch {
+    $status = "error"
+    $summary = "Port test encountered an error: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
+}
+finally {
     $payload = @{
         status  = $status
         summary = $summary
-        data    = @($result)
-        errors  = ,@($errList)
+        data    = @($results)
+        errors  = @($errors)
     }
-}
-catch {
-    $payload = @{
-        status  = "error"
-        summary = "Port test encountered an error: $($_.Exception.Message)"
-        data    = @()
-        errors  = ,@($_.Exception.Message)
-    }
-}
-finally {
     $payload | ConvertTo-Json -Depth 4 -Compress
 }

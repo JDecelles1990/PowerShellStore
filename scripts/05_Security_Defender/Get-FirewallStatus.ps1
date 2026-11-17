@@ -30,6 +30,20 @@ $errors = [System.Collections.Generic.List[string]]::new()
 $disabledProfiles = 0
 
 try {
+    # Determine target profile filter if CheckAllProfiles is false
+    $activeCategories = @()
+    if (-not $CheckAllProfiles) {
+        try {
+            $connProfiles = Get-NetConnectionProfile -ErrorAction Stop
+            if ($connProfiles) {
+                $activeCategories = @($connProfiles | ForEach-Object { [string]$_.NetworkCategory } | Select-Object -Unique)
+            }
+        }
+        catch {
+            $activeCategories = @()
+        }
+    }
+
     $queriedViaCmdlet = $false
 
     # Tier 1: NetSecurity Cmdlets (Get-NetFirewallProfile)
@@ -37,6 +51,14 @@ try {
         $profiles = Get-NetFirewallProfile -ErrorAction Stop
         if ($profiles -and $profiles.Count -gt 0) {
             foreach ($p in $profiles) {
+                if (-not $CheckAllProfiles -and $activeCategories.Count -gt 0) {
+                    $matched = ($activeCategories | Where-Object {
+                        ($_ -eq 'DomainAuthenticated' -and $p.Name -eq 'Domain') -or
+                        ($_ -eq [string]$p.Name)
+                    }).Count -gt 0
+                    if (-not $matched) { continue }
+                }
+
                 $isEnabled = [bool]$p.Enabled
                 if (-not $isEnabled) { $disabledProfiles++ }
 
@@ -62,8 +84,16 @@ try {
         }
 
         foreach ($entry in $profileMap.GetEnumerator()) {
+            if (-not $CheckAllProfiles -and $activeCategories.Count -gt 0) {
+                $matched = ($activeCategories | Where-Object {
+                    ($_ -eq 'DomainAuthenticated' -and $entry.Value -eq 'Domain') -or
+                    ($_ -eq $entry.Value)
+                }).Count -gt 0
+                if (-not $matched) { continue }
+            }
+
             $subPath = Join-Path -Path $regRoot -ChildPath $entry.Key
-            if (Test-Path $subPath) {
+            if (Test-Path -Path $subPath -ErrorAction Stop) {
                 $pVal = Get-ItemProperty -Path $subPath -ErrorAction SilentlyContinue
                 $enabledVal = $pVal.EnableFirewall
                 $isEnabled = ($enabledVal -eq 1 -or $enabledVal -eq "1")

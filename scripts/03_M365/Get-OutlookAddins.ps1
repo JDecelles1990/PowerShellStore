@@ -22,9 +22,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-try {
-    $results = @()
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
 
+try {
     # Search registry locations for Outlook add-ins
     $registryKeys = @(
         @{ Path = "HKCU:\SOFTWARE\Microsoft\Office\Outlook\Addins"; Scope = "Current User" },
@@ -33,79 +36,94 @@ try {
     )
 
     foreach ($reg in $registryKeys) {
-        if (Test-Path $reg.Path) {
-            $subKeys = Get-ChildItem -Path $reg.Path -ErrorAction SilentlyContinue
-            foreach ($sk in $subKeys) {
-                $props = Get-ItemProperty -Path $sk.PSPath -ErrorAction SilentlyContinue
-                $progId = Split-Path $sk.Name -Leaf
-                $friendlyName = if ($props.FriendlyName) { $props.FriendlyName } else { $progId }
-                $loadVal = if ($null -ne $props.LoadBehavior) { [int]$props.LoadBehavior } else { -1 }
+        try {
+            if (Test-Path -Path $reg.Path -ErrorAction Stop) {
+                $subKeys = Get-ChildItem -Path $reg.Path -ErrorAction Stop
+                foreach ($sk in $subKeys) {
+                    $props = Get-ItemProperty -Path $sk.PSPath -ErrorAction SilentlyContinue
+                    $progId = Split-Path -Path $sk.Name -Leaf
+                    $friendlyName = if ($props -and $props.FriendlyName) { [string]$props.FriendlyName } else { $progId }
+                    $loadVal = if ($props -and $null -ne $props.LoadBehavior) { [int]$props.LoadBehavior } else { -1 }
 
-                $statusText = switch ($loadVal) {
-                    3 { "Active (Loaded at Startup)" }
-                    2 { "Disabled (Do Not Load)" }
-                    1 { "Load on Demand" }
-                    0 { "Inactive" }
-                    default { "Unknown ($loadVal)" }
-                }
+                    $statusText = switch ($loadVal) {
+                        3 { "Active (Loaded at Startup)" }
+                        2 { "Disabled (Do Not Load)" }
+                        1 { "Load on Demand" }
+                        0 { "Inactive" }
+                        default { "Unknown ($loadVal)" }
+                    }
 
-                $results += [PSCustomObject]@{
-                    AddinName         = $friendlyName
-                    ProgId            = $progId
-                    LoadBehavior      = $loadVal
-                    StatusDescription = $statusText
-                    Scope             = $reg.Scope
-                    Details           = if ($props.Description) { $props.Description } else { "No description" }
+                    $results.Add([PSCustomObject]@{
+                        AddinName         = $friendlyName
+                        ProgId            = $progId
+                        LoadBehavior      = $loadVal
+                        StatusDescription = $statusText
+                        Scope             = $reg.Scope
+                        Details           = if ($props -and $props.Description) { [string]$props.Description } else { "No description" }
+                    })
                 }
             }
+        }
+        catch {
+            $errors.Add("Registry access notice ($($reg.Scope)): $($_.Exception.Message)")
         }
     }
 
     # Optional .OST File Size Audit
-    if ($CheckOSTSize) {
-        $ostDir = "$env:LOCALAPPDATA\Microsoft\Outlook"
-        if (Test-Path $ostDir) {
-            $ostFiles = Get-ChildItem -Path $ostDir -Filter "*.ost" -File -ErrorAction SilentlyContinue
-            foreach ($ost in $ostFiles) {
-                $sizeGb = [math]::Round($ost.Length / 1GB, 2)
-                $health = if ($sizeGb -gt 40) { "Warning: Approaching 50GB Limit" } else { "Normal ($sizeGb GB)" }
+    if ($CheckOSTSize -and $env:LOCALAPPDATA) {
+        try {
+            $ostDir = Join-Path -Path $env:LOCALAPPDATA -ChildPath "Microsoft\Outlook"
+            if (Test-Path -Path $ostDir -ErrorAction Stop) {
+                $ostFiles = Get-ChildItem -Path $ostDir -Filter "*.ost" -File -ErrorAction Stop
+                foreach ($ost in $ostFiles) {
+                    $sizeGb = [math]::Round($ost.Length / 1GB, 2)
+                    $health = if ($sizeGb -gt 40) { "Warning: Approaching 50GB Limit" } else { "Normal ($sizeGb GB)" }
 
-                $results += [PSCustomObject]@{
-                    AddinName         = "[OST Cache File]"
-                    ProgId            = $ost.Name
-                    LoadBehavior      = 0
-                    StatusDescription = $health
-                    Scope             = "Local Mailbox Cache"
-                    Details           = "Full Path: $($ost.FullName)"
+                    $results.Add([PSCustomObject]@{
+                        AddinName         = "[OST Cache File]"
+                        ProgId            = $ost.Name
+                        LoadBehavior      = 0
+                        StatusDescription = $health
+                        Scope             = "Local Mailbox Cache"
+                        Details           = "Full Path: $($ost.FullName)"
+                    })
                 }
             }
+        }
+        catch {
+            $errors.Add("OST audit notice: $($_.Exception.Message)")
         }
     }
 
     # Human-readable table first
     if ($results.Count -gt 0) {
-        $results | Format-Table -AutoSize | Out-String | Write-Output
+        $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
     }
     else {
-        Write-Output "No Outlook COM Add-ins or .OST files detected in the registry."
+        Write-Output "No Outlook COM Add-ins or .OST files detected."
     }
 
+    if ($errors.Count -gt 0 -and $results.Count -eq 0) {
+        $status = "warning"
+        $summary = "Outlook audit finished with access notices ($($errors.Count))."
+    }
+    else {
+        $summary = "Discovered $($results.Count) Outlook Add-in and mailbox cache artifact(s)."
+    }
+}
+catch {
+    $status = "error"
+    $summary = "Failed to query Outlook Add-ins: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
+}
+finally {
     $payload = @{
-        status  = "pass"
-        summary = "Discovered $($results.Count) Outlook Add-in and mailbox cache artifact(s)."
+        status  = $status
+        summary = $summary
         data    = @($results)
-        errors  = @()
+        errors  = @($errors)
     }
     $payload | ConvertTo-Json -Depth 4 -Compress
 }
-catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to query Outlook Add-ins: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
-}
-

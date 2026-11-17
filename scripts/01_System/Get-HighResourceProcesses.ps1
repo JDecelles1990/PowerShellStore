@@ -26,26 +26,32 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$topList = @()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
-    # Validate SortBy parameter
+    # Validate parameters
     if ($SortBy -notmatch '^(CPU|Memory)$') {
         $SortBy = "CPU"
     }
+    $TopCount = [math]::Max(1, [math]::Min(50, $TopCount))
 
     $allProcesses = Get-Process -ErrorAction Stop
 
-    $results = @()
+    $results = [System.Collections.Generic.List[PSObject]]::new()
     foreach ($proc in $allProcesses) {
         $wsMb = [math]::Round($proc.WorkingSet64 / 1MB, 2)
         $pmMb = [math]::Round($proc.PrivateMemorySize64 / 1MB, 2)
         $cpuSec = if ($proc.CPU) { [math]::Round($proc.CPU, 2) } else { 0.0 }
 
         $procPath = "N/A"
-        $company = "N/A"
+        $company = "Unknown"
         try {
             if ($proc.Path) {
                 $procPath = $proc.Path
-                $company = $proc.Company
+                if ($proc.Company) { $company = $proc.Company }
             }
         }
         catch {
@@ -53,44 +59,45 @@ try {
             $procPath = "Access Denied (System/Protected)"
         }
 
-        $results += [PSCustomObject]@{
+        $results.Add([PSCustomObject]@{
             ProcessName  = $proc.ProcessName
             PID          = $proc.Id
             WorkingSetMB = $wsMb
             PrivateMemMB = $pmMb
             CPUSec       = $cpuSec
-            Company      = if ($company) { $company } else { "Unknown" }
+            Company      = $company
             Path         = $procPath
-        }
+        })
     }
 
     # Sort results
     if ($SortBy -eq "Memory") {
-        $topList = $results | Sort-Object WorkingSetMB -Descending | Select-Object -First $TopCount
+        $topList = @($results | Sort-Object -Property WorkingSetMB -Descending | Select-Object -First $TopCount)
     }
     else {
-        $topList = $results | Sort-Object CPUSec -Descending | Select-Object -First $TopCount
+        $topList = @($results | Sort-Object -Property CPUSec -Descending | Select-Object -First $TopCount)
     }
 
     # Human-readable table first for terminal / RMM
-    $topList | Format-Table -AutoSize | Out-String | Write-Output
+    if ($topList.Count -gt 0) {
+        $tableOutput = $topList | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
+    }
 
+    $summary = "Retrieved top $($topList.Count) resource-consuming processes sorted by $SortBy."
+}
+catch {
+    $status = "error"
+    $summary = "Failed to query process metrics: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
+}
+finally {
     $payload = @{
-        status  = "pass"
-        summary = "Retrieved top $TopCount resource-consuming processes sorted by $SortBy."
+        status  = $status
+        summary = $summary
         data    = @($topList)
-        errors  = @()
+        errors  = @($errors)
     }
     $payload | ConvertTo-Json -Depth 4 -Compress
 }
-catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to query process metrics: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
-}
-

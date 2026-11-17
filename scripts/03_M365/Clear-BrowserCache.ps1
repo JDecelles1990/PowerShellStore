@@ -26,13 +26,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
     # Validate TargetBrowser
     if ($TargetBrowser -notmatch '^(All|Edge|Chrome)$') {
         $TargetBrowser = "All"
     }
 
-    $results = @()
     $totalFreedMb = 0.0
 
     # Browser definitions: process names and relative cache folder paths
@@ -63,61 +67,71 @@ try {
     foreach ($b in $browserDefs) {
         # Optionally terminate running instance to release file locks
         if ($CloseRunningBrowsers) {
-            Get-Process -Name $b.ProcName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 300
+            try {
+                Get-Process -Name $b.ProcName -ErrorAction Stop | Stop-Process -Force -ErrorAction Stop
+                Start-Sleep -Milliseconds 300
+            }
+            catch {
+                # Browser not running
+            }
         }
 
         foreach ($cPath in $b.CacheRoots) {
-            if (Test-Path $cPath) {
-                # Calculate size before deletion
+            if (Test-Path -Path $cPath -ErrorAction Stop) {
                 $files = Get-ChildItem -Path $cPath -Recurse -File -ErrorAction SilentlyContinue
-                $folderBytes = ($files | Measure-Object -Property Length -Sum).Sum
-                $folderMb = if ($folderBytes) { [math]::Round($folderBytes / 1MB, 2) } else { 0.0 }
+                $folderBytes = if ($files) { ($files | Measure-Object -Property Length -Sum).Sum } else { 0 }
+                $folderMb = if ($folderBytes) { [math]::Round([double]$folderBytes / 1MB, 2) } else { 0.0 }
 
-                # Remove cache files safely
-                Remove-Item -Path "$cPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+                try {
+                    Remove-Item -Path "$cPath\*" -Recurse -Force -ErrorAction Stop
+                    $cacheStatus = "Cleared"
+                }
+                catch {
+                    $cacheStatus = "Partially Cleared (Some Files Locked)"
+                    $errors.Add("$($b.Name) ($(Split-Path $cPath -Leaf)): $($_.Exception.Message)")
+                }
 
                 $totalFreedMb += $folderMb
-                $results += [PSCustomObject]@{
+                $results.Add([PSCustomObject]@{
                     Browser       = $b.Name
                     CacheLocation = (Split-Path $cPath -Leaf)
                     FreedMB       = $folderMb
-                    Status        = "Cleared"
-                }
+                    Status        = $cacheStatus
+                })
             }
             else {
-                $results += [PSCustomObject]@{
+                $results.Add([PSCustomObject]@{
                     Browser       = $b.Name
                     CacheLocation = (Split-Path $cPath -Leaf)
                     FreedMB       = 0.0
                     Status        = "Directory Not Found (Clean)"
-                }
+                })
             }
         }
     }
 
     # Human-readable table first
-    $results | Format-Table -AutoSize | Out-String | Write-Output
+    if ($results.Count -gt 0) {
+        $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
+    }
 
     $roundedTotal = [math]::Round($totalFreedMb, 2)
     Write-Output "[SUCCESS] Total browser cache purged: $roundedTotal MB"
-
+    $summary = "Successfully purged $roundedTotal MB of temporary cache files across targeted browser(s)."
+}
+catch {
+    $status = "error"
+    $summary = "Failed to clear browser cache: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
+}
+finally {
     $payload = @{
-        status  = "pass"
-        summary = "Successfully purged $roundedTotal MB of temporary cache files across targeted browser(s)."
+        status  = $status
+        summary = $summary
         data    = @($results)
-        errors  = @()
+        errors  = @($errors)
     }
     $payload | ConvertTo-Json -Depth 4 -Compress
 }
-catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to clear browser cache: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
-}
-

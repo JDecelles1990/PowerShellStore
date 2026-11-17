@@ -28,57 +28,72 @@ $results = [System.Collections.Generic.List[PSObject]]::new()
 $errors = [System.Collections.Generic.List[string]]::new()
 
 try {
-    $volumes = @()
+    $queriedCmdlet = $false
 
-    # Attempt primary method: Get-BitLockerVolume cmdlet
+    # Tier 1: Get-BitLockerVolume cmdlet
     $hasBitLockerCmdlet = Get-Command -Name Get-BitLockerVolume -ErrorAction SilentlyContinue
     if ($hasBitLockerCmdlet) {
-        if (-not [string]::IsNullOrWhiteSpace($MountPoint)) {
-            $volumes = @(Get-BitLockerVolume -MountPoint $MountPoint -ErrorAction Stop)
-        } else {
-            $volumes = @(Get-BitLockerVolume -ErrorAction Stop)
-        }
-
-        foreach ($vol in $volumes) {
-            $protectors = if ($vol.KeyProtector) {
-                ($vol.KeyProtector | ForEach-Object { $_.KeyProtectorType }) -join ", "
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($MountPoint)) {
+                $volumes = @(Get-BitLockerVolume -MountPoint $MountPoint -ErrorAction Stop)
             } else {
-                "None"
+                $volumes = @(Get-BitLockerVolume -ErrorAction Stop)
             }
 
-            $isProtected = ($vol.ProtectionStatus -eq "On" -or $vol.ProtectionStatus -eq 1)
-            $pctEncrypted = [math]::Round([double]$vol.EncryptionPercentage, 1)
+            foreach ($vol in $volumes) {
+                $protectors = if ($vol.KeyProtector) {
+                    ($vol.KeyProtector | ForEach-Object { $_.KeyProtectorType }) -join ", "
+                } else {
+                    "None"
+                }
 
-            if (-not $isProtected -or $pctEncrypted -lt 100) {
-                $status = "warning"
+                $isProtected = ($vol.ProtectionStatus -eq "On" -or $vol.ProtectionStatus -eq 1)
+                $pctEncrypted = [math]::Round([double]$vol.EncryptionPercentage, 1)
+
+                if (-not $isProtected -or $pctEncrypted -lt 100) {
+                    $status = "warning"
+                }
+
+                $results.Add([PSCustomObject]@{
+                    MountPoint           = [string]$vol.MountPoint
+                    VolumeType           = $vol.VolumeType.ToString()
+                    ProtectionStatus     = if ($isProtected) { "Protected" } else { "Unprotected" }
+                    EncryptionPercentage = "$pctEncrypted%"
+                    VolumeStatus         = $vol.VolumeStatus.ToString()
+                    KeyProtectors        = $protectors
+                })
             }
-
-            $results.Add([PSCustomObject]@{
-                MountPoint          = $vol.MountPoint
-                VolumeType          = $vol.VolumeType.ToString()
-                ProtectionStatus    = if ($isProtected) { "Protected" } else { "Unprotected" }
-                EncryptionPercentage= "$pctEncrypted%"
-                VolumeStatus        = $vol.VolumeStatus.ToString()
-                KeyProtectors       = $protectors
-            })
+            $queriedCmdlet = $true
         }
-    } else {
-        # Fallback method: manage-bde.exe -status
-        $manageBde = Join-Path -Path $env:SystemRoot -ChildPath "System32\manage-bde.exe"
-        if (Test-Path -Path $manageBde) {
-            $targetArg = if (-not [string]::IsNullOrWhiteSpace($MountPoint)) { $MountPoint } else { "-status" }
-            $bdeOutput = & $manageBde -status $targetArg 2>&1
-            $rawText = ($bdeOutput | Out-String)
+        catch {
+            # Fall through to manage-bde.exe fallback
+            $results.Clear()
+        }
+    }
 
-            # Parse volume blocks from manage-bde output
+    # Tier 2: manage-bde.exe -status fallback
+    if (-not $queriedCmdlet) {
+        $manageBde = Join-Path -Path $env:SystemRoot -ChildPath "System32\manage-bde.exe"
+        if (Test-Path -Path $manageBde -ErrorAction Stop) {
+            if (-not [string]::IsNullOrWhiteSpace($MountPoint)) {
+                $bdeOutput = & $manageBde -status $MountPoint 2>&1
+            } else {
+                $bdeOutput = & $manageBde -status 2>&1
+            }
+            if ($LASTEXITCODE -ne 0 -and -not ($bdeOutput | Where-Object { $_ -match "Volume " })) {
+                $errDetail = ($bdeOutput | Out-String).Trim()
+                throw "manage-bde exited with code ${LASTEXITCODE}: $errDetail"
+            }
+
+            $rawText = ($bdeOutput | Out-String)
             $volumeBlocks = $rawText -split "Volume ([A-Za-z]:)"
             for ($i = 1; $i -lt $volumeBlocks.Count; $i += 2) {
                 $driveLetter = $volumeBlocks[$i]
                 $blockData = $volumeBlocks[$i + 1]
 
-                $convStatus = if ($blockData -match "Conversion Status:\s*(.+)") { $Matches[1].Trim() } else { "Unknown" }
-                $pct = if ($blockData -match "Percentage Encrypted:\s*(.+)") { $Matches[1].Trim() } else { "Unknown" }
-                $protStatus = if ($blockData -match "Protection Status:\s*(.+)") { $Matches[1].Trim() } else { "Unknown" }
+                $convStatus = if ($blockData -match "Conversion Status:\s*([^\r\n]+)") { $Matches[1].Trim() } else { "Unknown" }
+                $pct = if ($blockData -match "Percentage Encrypted:\s*([^\r\n]+)") { $Matches[1].Trim() } else { "Unknown" }
+                $protStatus = if ($blockData -match "Protection Status:\s*([^\r\n]+)") { $Matches[1].Trim() } else { "Unknown" }
 
                 $isProt = ($protStatus -match "Protection On")
                 if (-not $isProt -or $pct -notmatch "100") {
@@ -94,7 +109,8 @@ try {
                     KeyProtectors        = "manage-bde queried"
                 })
             }
-        } else {
+        }
+        else {
             throw "Neither Get-BitLockerVolume nor manage-bde.exe is available on this system."
         }
     }
@@ -102,11 +118,19 @@ try {
     if ($results.Count -eq 0) {
         $status = "warning"
         $summary = "No BitLocker-compatible volumes were discovered."
+        Write-Output $summary
     } elseif ($status -eq "warning") {
         $unprot = ($results | Where-Object { $_.ProtectionStatus -ne "Protected" -or $_.EncryptionPercentage -notmatch "100" }).Count
         $summary = "Warning: $unprot volume(s) are unencrypted or unprotected."
     } else {
         $summary = "$($results.Count) volume(s) verified fully encrypted and protected."
+    }
+
+    # Human-readable table before JSON envelope
+    if ($results.Count -gt 0) {
+        $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
     }
 }
 catch {
@@ -123,4 +147,3 @@ finally {
     }
     $payload | ConvertTo-Json -Depth 4 -Compress
 }
-

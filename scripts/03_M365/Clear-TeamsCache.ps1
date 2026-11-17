@@ -97,6 +97,11 @@ try {
         ActionsLog               = ($actions -join " | ")
     }
 
+    # Human-readable table first for RMM and Console
+    $tableOutput = @($evidence) | Format-Table -Property ClassicTeamsCacheCleared, NewTeamsCacheCleared, ProcessesTerminated, Relaunched -AutoSize | Out-String -Width 4096
+    Write-Output $tableOutput.Trim()
+    Write-Output ""
+
     $payload = @{
         status  = "pass"
         summary = $summary

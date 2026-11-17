@@ -67,6 +67,12 @@ try {
         "All $(@($drives).Count) fixed drive(s) have healthy free capacity (>= ${LowSpaceThresholdPercent}%)."
     }
 
+    if ($drives.Count -gt 0) {
+        $tableOutput = $drives | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
+    }
+
     $payload = @{
         status  = $status
         summary = $summary

@@ -22,7 +22,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
+    $DaysThreshold = [math]::Max(1, [math]::Min(180, $DaysThreshold))
     $now = Get-Date
     $warnDate = $now.AddDays($DaysThreshold)
 
@@ -32,72 +38,72 @@ try {
         @{ Path = "Cert:\LocalMachine\Root"; Name = "LocalMachine\Root" }
     )
 
-    $results = @()
     foreach ($store in $stores) {
-        if (Test-Path $store.Path) {
-            $certs = Get-ChildItem -Path $store.Path -ErrorAction SilentlyContinue
-            foreach ($cert in $certs) {
-                if ($cert.NotAfter -le $warnDate) {
-                    $isExpired = $cert.NotAfter -lt $now
-                    $diffDays = [int]($cert.NotAfter - $now).TotalDays
+        try {
+            if (Test-Path -Path $store.Path -ErrorAction Stop) {
+                $certs = Get-ChildItem -Path $store.Path -ErrorAction Stop
+                foreach ($cert in $certs) {
+                    if ($null -eq $cert.NotAfter) { continue }
+                    if ($cert.NotAfter -le $warnDate) {
+                        $isExpired = $cert.NotAfter -lt $now
+                        $diffDays = [int]($cert.NotAfter - $now).TotalDays
 
-                    $cleanSubject = if ($cert.Subject) {
-                        ($cert.Subject -replace 'CN=', '').Split(',')[0].Trim()
-                    } else {
-                        "Unknown Subject"
-                    }
+                        $cleanSubject = if ($cert.Subject) {
+                            ($cert.Subject -replace 'CN=', '').Split(',')[0].Trim()
+                        } else {
+                            "Unknown Subject"
+                        }
 
-                    $cleanIssuer = if ($cert.Issuer) {
-                        ($cert.Issuer -replace 'CN=', '').Split(',')[0].Trim()
-                    } else {
-                        "Unknown Issuer"
-                    }
+                        $cleanIssuer = if ($cert.Issuer) {
+                            ($cert.Issuer -replace 'CN=', '').Split(',')[0].Trim()
+                        } else {
+                            "Unknown Issuer"
+                        }
 
-                    $results += [PSCustomObject]@{
-                        Store         = $store.Name
-                        Subject       = $cleanSubject
-                        Issuer        = $cleanIssuer
-                        Expiration    = $cert.NotAfter.ToString("yyyy-MM-dd")
-                        DaysRemaining = $diffDays
-                        Status        = if ($isExpired) { "EXPIRED" } else { "EXPIRING SOON" }
-                        Thumbprint    = $cert.Thumbprint
+                        $results.Add([PSCustomObject]@{
+                            Store         = $store.Name
+                            Subject       = $cleanSubject
+                            Issuer        = $cleanIssuer
+                            Expiration    = $cert.NotAfter.ToString("yyyy-MM-dd")
+                            DaysRemaining = $diffDays
+                            Status        = if ($isExpired) { "EXPIRED" } else { "EXPIRING SOON" }
+                            Thumbprint    = $cert.Thumbprint
+                        })
                     }
                 }
             }
         }
+        catch {
+            $errors.Add("Certificate store notice ($($store.Name)): $($_.Exception.Message)")
+        }
     }
 
     if ($results.Count -eq 0) {
+        $status = "pass"
+        $summary = "All certificates valid: 0 certificates expiring within the next $DaysThreshold day(s)."
         Write-Output "No expired or expiring certificates found within the $DaysThreshold-day threshold."
-        $payload = @{
-            status  = "pass"
-            summary = "All certificates valid: 0 certificates expiring within the next $DaysThreshold day(s)."
-            data    = @()
-            errors  = @()
-        }
     }
     else {
         # Human-readable table first
-        $results | Format-Table -AutoSize | Out-String | Write-Output
+        $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
 
-        $payload = @{
-            status  = "warning"
-            summary = "Found $($results.Count) certificate(s) that are expired or expiring within $DaysThreshold day(s)."
-            data    = @($results)
-            errors  = @()
-        }
+        $status = "warning"
+        $summary = "Found $($results.Count) certificate(s) that are expired or expiring within $DaysThreshold day(s)."
     }
-
-    $payload | ConvertTo-Json -Depth 4 -Compress
 }
 catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to audit certificate stores: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
+    $status = "error"
+    $summary = "Failed to audit certificate stores: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
 }
-
+finally {
+    $payload = @{
+        status  = $status
+        summary = $summary
+        data    = @($results)
+        errors  = @($errors)
+    }
+    $payload | ConvertTo-Json -Depth 4 -Compress
+}

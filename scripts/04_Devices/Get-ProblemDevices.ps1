@@ -22,6 +22,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
     # Query PnP devices reporting non-zero config error codes
     $devices = Get-CimInstance -ClassName Win32_PnPEntity -Filter "ConfigManagerErrorCode <> 0" -ErrorAction Stop
@@ -38,60 +43,56 @@ try {
         43 = "Windows has stopped this device because it reported problems (Code 43)"
     }
 
-    $results = @()
-    foreach ($dev in $devices) {
-        $code = [int]$dev.ConfigManagerErrorCode
-        if (-not $IncludeDisabled -and $code -eq 22) {
-            continue
-        }
+    if ($devices) {
+        foreach ($dev in $devices) {
+            $code = [int]$dev.ConfigManagerErrorCode
+            if (-not $IncludeDisabled -and $code -eq 22) {
+                continue
+            }
 
-        $desc = if ($errorMap.ContainsKey($code)) {
-            $errorMap[$code]
-        } else {
-            "Hardware Error Code $code"
-        }
+            $desc = if ($errorMap.ContainsKey($code)) {
+                $errorMap[$code]
+            } else {
+                "Hardware Error Code $code"
+            }
 
-        $results += [PSCustomObject]@{
-            DeviceName       = if ($dev.Name) { $dev.Name } else { "Unknown Device" }
-            DeviceID         = $dev.DeviceID
-            ErrorCode        = $code
-            ErrorDescription = $desc
-            DeviceClass      = if ($dev.PNPClass) { $dev.PNPClass } else { "Unclassified" }
-            Manufacturer     = if ($dev.Manufacturer) { $dev.Manufacturer } else { "Unknown" }
+            $results.Add([PSCustomObject]@{
+                DeviceName       = if ($dev.Name) { $dev.Name } else { "Unknown Device" }
+                DeviceID         = $dev.DeviceID
+                ErrorCode        = $code
+                ErrorDescription = $desc
+                DeviceClass      = if ($dev.PNPClass) { $dev.PNPClass } else { "Unclassified" }
+                Manufacturer     = if ($dev.Manufacturer) { $dev.Manufacturer } else { "Unknown" }
+            })
         }
     }
 
     if ($results.Count -eq 0) {
+        $status = "pass"
+        $summary = "Hardware health is clear: 0 devices reporting error codes in Device Manager."
         Write-Output "No problem devices or hardware error codes detected in Device Manager."
-        $payload = @{
-            status  = "pass"
-            summary = "Hardware health is clear: 0 devices reporting error codes in Device Manager."
-            data    = @()
-            errors  = @()
-        }
     }
     else {
         # Human-readable table first
-        $results | Format-Table -AutoSize | Out-String | Write-Output
+        $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
 
-        $payload = @{
-            status  = "warning"
-            summary = "Found $($results.Count) device(s) reporting error codes or missing drivers."
-            data    = @($results)
-            errors  = @()
-        }
+        $status = "warning"
+        $summary = "Found $($results.Count) device(s) reporting error codes or missing drivers."
     }
-
-    $payload | ConvertTo-Json -Depth 4 -Compress
 }
 catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to scan problem devices: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
+    $status = "error"
+    $summary = "Failed to scan problem devices: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
 }
-
+finally {
+    $payload = @{
+        status  = $status
+        summary = $summary
+        data    = @($results)
+        errors  = @($errors)
+    }
+    $payload | ConvertTo-Json -Depth 4 -Compress
+}

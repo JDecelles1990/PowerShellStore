@@ -22,35 +22,49 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$sortedResults = @()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
+    $MaxDays = [math]::Max(1, [math]::Min(90, $MaxDays))
     $cutoffDate = (Get-Date).AddDays(-$MaxDays)
-    $results = @()
+    $results = [System.Collections.Generic.List[PSObject]]::new()
 
     # 1. Inspect Windows Minidump files
     $minidumpDir = "$env:SystemRoot\Minidump"
-    if (Test-Path $minidumpDir) {
-        $dumpFiles = Get-ChildItem -Path $minidumpDir -Filter "*.dmp" -ErrorAction SilentlyContinue |
+    if (Test-Path -Path $minidumpDir -ErrorAction Stop) {
+        $dumpFiles = Get-ChildItem -Path $minidumpDir -Filter "*.dmp" -ErrorAction Stop |
             Where-Object { $_.LastWriteTime -ge $cutoffDate } |
             Sort-Object LastWriteTime -Descending
 
         foreach ($dump in $dumpFiles) {
             $sizeKb = [math]::Round($dump.Length / 1KB, 1)
-            $results += [PSCustomObject]@{
-                Timestamp    = $dump.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
-                Source       = "Minidump File"
-                EventOrCode  = "MEMORY.DMP"
-                Details      = "Size: $sizeKb KB"
-                FilePath     = $dump.FullName
-            }
+            $results.Add([PSCustomObject]@{
+                Timestamp   = $dump.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+                Source      = "Minidump File"
+                EventOrCode = "MEMORY.DMP"
+                Details     = "Size: $sizeKb KB"
+                FilePath    = $dump.FullName
+            })
         }
     }
 
     # 2. Inspect System Event Log for BugCheck (1001) and Kernel-Power (41)
-    $events = Get-WinEvent -FilterHashtable @{
-        LogName   = 'System'
-        Id        = @(41, 1001)
-        StartTime = $cutoffDate
-    } -MaxEvents 50 -ErrorAction SilentlyContinue
+    $events = @()
+    try {
+        $events = Get-WinEvent -FilterHashtable @{
+            LogName   = 'System'
+            Id        = @(41, 1001)
+            StartTime = $cutoffDate
+        } -MaxEvents 50 -ErrorAction Stop
+    }
+    catch {
+        if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound') {
+            throw
+        }
+    }
 
     if ($events) {
         foreach ($evt in $events) {
@@ -60,50 +74,45 @@ try {
                 $cleanMsg = $cleanMsg.Substring(0, 117) + "..."
             }
 
-            $results += [PSCustomObject]@{
-                Timestamp    = $evt.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
-                Source       = $src
-                EventOrCode  = "Event ID $($evt.Id)"
-                Details      = $cleanMsg
-                FilePath     = "EventLog: System"
-            }
+            $results.Add([PSCustomObject]@{
+                Timestamp   = $evt.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
+                Source      = $src
+                EventOrCode = "Event ID $($evt.Id)"
+                Details     = $cleanMsg
+                FilePath    = "EventLog: System"
+            })
         }
     }
 
     # Sort all by Timestamp descending
-    $sortedResults = @($results | Sort-Object Timestamp -Descending)
+    $sortedResults = @($results | Sort-Object -Property Timestamp -Descending)
 
     if ($sortedResults.Count -eq 0) {
+        $status = "pass"
+        $summary = "System is healthy: 0 BSOD crashes or minidumps detected in the past $MaxDays day(s)."
         Write-Output "No system crash dumps or BSOD events detected in the last $MaxDays day(s)."
-        $payload = @{
-            status  = "pass"
-            summary = "System is healthy: 0 BSOD crashes or minidumps detected in the past $MaxDays day(s)."
-            data    = @()
-            errors  = @()
-        }
     }
     else {
         # Human-readable table first
-        $sortedResults | Format-Table -AutoSize | Out-String | Write-Output
+        $tableOutput = $sortedResults | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
 
-        $payload = @{
-            status  = "warning"
-            summary = "Found $($sortedResults.Count) crash/unclean shutdown event(s) in the past $MaxDays day(s)."
-            data    = @($sortedResults)
-            errors  = @()
-        }
+        $status = "warning"
+        $summary = "Found $($sortedResults.Count) crash/unclean shutdown event(s) in the past $MaxDays day(s)."
     }
-
-    $payload | ConvertTo-Json -Depth 4 -Compress
 }
 catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to inspect system crash history: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
+    $status = "error"
+    $summary = "Failed to inspect system crash history: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
 }
-
+finally {
+    $payload = @{
+        status  = $status
+        summary = $summary
+        data    = @($sortedResults)
+        errors  = @($errors)
+    }
+    $payload | ConvertTo-Json -Depth 4 -Compress
+}

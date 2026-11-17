@@ -37,6 +37,6 @@ catch {
 }
 finally {
     # Ensure service status is always reported for RMM activity logs
-    Get-Service -Name Spooler | Select-Object Name, Status, StartType
+    Get-Service -Name Spooler -ErrorAction SilentlyContinue | Select-Object Name, Status, StartType
 }
 

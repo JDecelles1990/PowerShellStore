@@ -53,11 +53,14 @@ try {
     $partialKey = "N/A"
 
     if ($CheckVolumeLicensing) {
-        $osppCandidates = @(
-            (Join-Path -Path $env:ProgramFiles -ChildPath "Microsoft Office\Office16\OSPP.VBS"),
-            (Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath "Microsoft Office\Office16\OSPP.VBS"),
-            (Join-Path -Path $env:ProgramFiles -ChildPath "Microsoft Office\Office15\OSPP.VBS")
-        )
+        $osppCandidates = [System.Collections.Generic.List[string]]::new()
+        if ($env:ProgramFiles) {
+            $osppCandidates.Add((Join-Path -Path $env:ProgramFiles -ChildPath "Microsoft Office\Office16\OSPP.VBS"))
+            $osppCandidates.Add((Join-Path -Path $env:ProgramFiles -ChildPath "Microsoft Office\Office15\OSPP.VBS"))
+        }
+        if (${env:ProgramFiles(x86)}) {
+            $osppCandidates.Add((Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath "Microsoft Office\Office16\OSPP.VBS"))
+        }
 
         foreach ($ospp in $osppCandidates) {
             if ([System.IO.File]::Exists($ospp)) {

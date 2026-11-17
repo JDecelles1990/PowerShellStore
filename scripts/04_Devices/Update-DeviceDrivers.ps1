@@ -30,10 +30,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-try {
-    $driverResults = [System.Collections.Generic.List[PSObject]]::new()
-    $rebootRequired = $false
+$status = "pass"
+$summary = ""
+$driverResults = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+$rebootRequired = $false
 
+try {
     # 1. Initialize Windows Update Session
     $updateSession = New-Object -ComObject Microsoft.Update.Session
     $searcher = $updateSession.CreateUpdateSearcher()
@@ -42,35 +45,43 @@ try {
     $searchCriteria = "IsInstalled=0 and Type='Driver' and IsHidden=0"
     $searchResult = $searcher.Search($searchCriteria)
 
-    $driversFound = $searchResult.Updates.Count
+    $totalRaw = $searchResult.Updates.Count
+
+    # Filter out optional/browse-only drivers if IncludeOptional is false
+    $updatesToDownload = New-Object -ComObject Microsoft.Update.UpdateColl
+    $skippedOptional = 0
+    for ($i = 0; $i -lt $totalRaw; $i++) {
+        $update = $searchResult.Updates.Item($i)
+        if (-not $IncludeOptional -and $update.BrowseOnly) {
+            $skippedOptional++
+            continue
+        }
+        $updatesToDownload.Add($update) | Out-Null
+    }
+
+    $driversFound = $updatesToDownload.Count
 
     if ($driversFound -eq 0) {
-        # Rescan PnP devices if requested
         if ($RescanPnPDevices) {
-            try { & pnputil.exe /scan-devices 2>$null } catch {}
+            try { & pnputil.exe /scan-devices 2>$null | Out-Null } catch {}
         }
 
-        $summary = "No pending device driver updates found via Windows Update. All drivers are up to date."
-        $payload = @{
-            status  = "pass"
-            summary = $summary
-            data    = @([PSCustomObject]@{
-                DriversFound      = 0
-                DriversInstalled  = 0
-                RebootRequired    = $false
-                PnPRescanned      = $RescanPnPDevices
-            })
-            errors  = @()
+        $status = "pass"
+        $summary = if ($skippedOptional -gt 0) {
+            "No mandatory device driver updates pending ($skippedOptional optional driver(s) skipped). PnP rescanned: $RescanPnPDevices."
+        } else {
+            "No pending device driver updates found via Windows Update. All drivers are up to date."
         }
+
+        $driverResults.Add([PSCustomObject]@{
+            DriverTitle    = "None pending"
+            Status         = "Up to date ($skippedOptional optional skipped)"
+            ResultCode     = 0
+            RebootRequired = $false
+        })
     }
     else {
         # 2. Download Driver Updates
-        $updatesToDownload = New-Object -ComObject Microsoft.Update.UpdateColl
-        for ($i = 0; $i -lt $searchResult.Updates.Count; $i++) {
-            $update = $searchResult.Updates.Item($i)
-            $updatesToDownload.Add($update) | Out-Null
-        }
-
         $downloader = $updateSession.CreateUpdateDownloader()
         $downloader.Updates = $updatesToDownload
         $downloadResult = $downloader.Download()
@@ -97,50 +108,55 @@ try {
                 $stepResult = $installResult.GetUpdateResult($i)
                 $statusText = switch ($stepResult.ResultCode) {
                     2 { $installedCount++; "Installed" }
-                    3 { "Installed (With Warnings)" }
+                    3 { $installedCount++; "Installed (With Warnings)" }
                     4 { "Failed" }
                     5 { "Aborted" }
                     default { "Result $($stepResult.ResultCode)" }
                 }
 
                 $driverResults.Add([PSCustomObject]@{
-                    DriverTitle = [string]$up.Title
-                    Status      = $statusText
-                    ResultCode  = [int]$stepResult.ResultCode
+                    DriverTitle    = [string]$up.Title
+                    Status         = $statusText
+                    ResultCode     = [int]$stepResult.ResultCode
+                    RebootRequired = $rebootRequired
                 })
             }
         }
 
         # 4. Rescan PnP Hardware
         if ($RescanPnPDevices) {
-            try { & pnputil.exe /scan-devices 2>$null } catch {}
+            try { & pnputil.exe /scan-devices 2>$null | Out-Null } catch {}
         }
 
-        # 5. Handle Reboot if configured
+        # 5. Schedule delayed Reboot if configured so JSON output finishes first
         if ($rebootRequired -and $RebootIfRequired) {
-            Restart-Computer -Force
+            Write-Output "[NOTICE] Reboot is required and RebootIfRequired is enabled. Scheduling restart in 60 seconds..."
+            & shutdown.exe /r /t 60 /c "PowerShellStore: Restarting system to complete device driver installation."
         }
 
         $status = if ($installedCount -gt 0) { "pass" } else { "warning" }
         $summary = "Driver update complete: $installedCount of $driversFound driver(s) installed. Reboot required: $rebootRequired."
+    }
 
-        $payload = @{
-            status  = $status
-            summary = $summary
-            data    = @($driverResults)
-            errors  = @()
-        }
+    # Human-readable table before JSON envelope
+    if ($driverResults.Count -gt 0) {
+        $tableOutput = $driverResults | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
     }
 }
 catch {
-    $payload = @{
-        status  = "error"
-        summary = "Failed to update device drivers: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
+    $status = "error"
+    $summary = "Failed to update device drivers: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
 }
 finally {
+    $payload = @{
+        status          = $status
+        summary         = $summary
+        reboot_required = $rebootRequired
+        data            = @($driverResults)
+        errors          = @($errors)
+    }
     $payload | ConvertTo-Json -Depth 4 -Compress
 }
-

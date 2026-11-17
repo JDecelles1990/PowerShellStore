@@ -46,27 +46,33 @@ try {
             }
             $processStopped = $true
             $actionRecords.Add([PSCustomObject]@{
-                Action  = "Terminate Process"
-                Status  = "Success"
-                Details = "Stopped running OneDrive and FileCoAuth processes."
-            })
+                    Action  = "Terminate Process"
+                    Status  = "Success"
+                    Details = "Stopped running OneDrive and FileCoAuth processes."
+                })
             Start-Sleep -Seconds 1
-        } else {
+        }
+        else {
             $actionRecords.Add([PSCustomObject]@{
-                Action  = "Terminate Process"
-                Status  = "Skipped"
-                Details = "OneDrive was not actively running."
-            })
+                    Action  = "Terminate Process"
+                    Status  = "Skipped"
+                    Details = "OneDrive was not actively running."
+                })
         }
     }
 
     # 2. Locate OneDrive Binary
     $oneDriveExe = ""
-    $candidates = @(
-        (Join-Path -Path $env:LOCALAPPDATA -ChildPath "Microsoft\OneDrive\OneDrive.exe"),
-        (Join-Path -Path $env:ProgramFiles -ChildPath "Microsoft OneDrive\OneDrive.exe"),
-        (Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath "Microsoft OneDrive\OneDrive.exe")
-    )
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    if ($env:LOCALAPPDATA) {
+        $candidates.Add((Join-Path -Path $env:LOCALAPPDATA -ChildPath "Microsoft\OneDrive\OneDrive.exe"))
+    }
+    if ($env:ProgramFiles) {
+        $candidates.Add((Join-Path -Path $env:ProgramFiles -ChildPath "Microsoft OneDrive\OneDrive.exe"))
+    }
+    if (${env:ProgramFiles(x86)}) {
+        $candidates.Add((Join-Path -Path ${env:ProgramFiles(x86)} -ChildPath "Microsoft OneDrive\OneDrive.exe"))
+    }
 
     foreach ($cand in $candidates) {
         if ([System.IO.File]::Exists($cand)) {
@@ -79,17 +85,17 @@ try {
         $status = "warning"
         $summary = "Microsoft OneDrive executable was not discovered on this system."
         $actionRecords.Add([PSCustomObject]@{
-            Action  = "Locate OneDrive"
-            Status  = "Warning"
-            Details = "OneDrive executable not found in standard user or system paths."
-        })
+                Action  = "Locate OneDrive"
+                Status  = "Warning"
+                Details = "OneDrive executable not found in standard user or system paths."
+            })
     }
     else {
         $actionRecords.Add([PSCustomObject]@{
-            Action  = "Locate OneDrive"
-            Status  = "Success"
-            Details = "Found OneDrive at $oneDriveExe"
-        })
+                Action  = "Locate OneDrive"
+                Status  = "Success"
+                Details = "Found OneDrive at $oneDriveExe"
+            })
 
         # 3. Clean temporary sync cache / stuck lock files
         $settingsPath = Join-Path -Path $env:LOCALAPPDATA -ChildPath "Microsoft\OneDrive\settings"
@@ -101,34 +107,36 @@ try {
                     try {
                         [System.IO.File]::Delete($lf)
                         $purgedLocks++
-                    } catch {}
+                    }
+                    catch {}
                 }
-            } catch {}
+            }
+            catch {}
         }
         $actionRecords.Add([PSCustomObject]@{
-            Action  = "Clear Sync Locks"
-            Status  = "Success"
-            Details = "Purged $purgedLocks stale sync lock files."
-        })
+                Action  = "Clear Sync Locks"
+                Status  = "Success"
+                Details = "Purged $purgedLocks stale sync lock files."
+            })
 
         # 4. Execute OneDrive Reset Switch
         if ($RunResetCommand) {
             try {
                 Start-Process -FilePath $oneDriveExe -ArgumentList "/reset" -ErrorAction Stop
                 $actionRecords.Add([PSCustomObject]@{
-                    Action  = "Execute Reset"
-                    Status  = "Success"
-                    Details = "Triggered '$oneDriveExe /reset' command."
-                })
+                        Action  = "Execute Reset"
+                        Status  = "Success"
+                        Details = "Triggered '$oneDriveExe /reset' command."
+                    })
                 Start-Sleep -Seconds 3
             }
             catch {
                 $errors.Add("Failed to execute /reset: $($_.Exception.Message)")
                 $actionRecords.Add([PSCustomObject]@{
-                    Action  = "Execute Reset"
-                    Status  = "Failed"
-                    Details = $_.Exception.Message
-                })
+                        Action  = "Execute Reset"
+                        Status  = "Failed"
+                        Details = $_.Exception.Message
+                    })
             }
         }
 
@@ -137,17 +145,17 @@ try {
             try {
                 Start-Process -FilePath $oneDriveExe -ErrorAction SilentlyContinue
                 $actionRecords.Add([PSCustomObject]@{
-                    Action  = "Relaunch Client"
-                    Status  = "Success"
-                    Details = "Triggered OneDrive background restart."
-                })
+                        Action  = "Relaunch Client"
+                        Status  = "Success"
+                        Details = "Triggered OneDrive background restart."
+                    })
             }
             catch {
                 $actionRecords.Add([PSCustomObject]@{
-                    Action  = "Relaunch Client"
-                    Status  = "Warning"
-                    Details = "Could not restart OneDrive: $($_.Exception.Message)"
-                })
+                        Action  = "Relaunch Client"
+                        Status  = "Warning"
+                        Details = "Could not restart OneDrive: $($_.Exception.Message)"
+                    })
             }
         }
 

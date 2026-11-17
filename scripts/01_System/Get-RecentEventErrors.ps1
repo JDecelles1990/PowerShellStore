@@ -26,7 +26,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
+    $HoursBack = [math]::Max(1, [math]::Min(168, $HoursBack))
+    $MaxEvents = [math]::Max(5, [math]::Min(100, $MaxEvents))
     $startTime = (Get-Date).AddHours(-$HoursBack)
 
     # Filter for Error (2) and Critical (1) in System and Application logs
@@ -36,9 +43,16 @@ try {
         StartTime = $startTime
     }
 
-    $rawEvents = Get-WinEvent -FilterHashtable $filter -MaxEvents $MaxEvents -ErrorAction SilentlyContinue
+    $rawEvents = @()
+    try {
+        $rawEvents = Get-WinEvent -FilterHashtable $filter -MaxEvents $MaxEvents -ErrorAction Stop
+    }
+    catch {
+        if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound') {
+            throw
+        }
+    }
 
-    $results = @()
     if ($rawEvents) {
         foreach ($evt in $rawEvents) {
             $levelName = switch ($evt.Level) {
@@ -52,48 +66,43 @@ try {
                 $cleanMessage = $cleanMessage.Substring(0, 147) + "..."
             }
 
-            $results += [PSCustomObject]@{
-                TimeCreated  = $evt.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
-                LogName      = $evt.LogName
-                Level        = $levelName
-                EventID      = $evt.Id
-                ProviderName = $evt.ProviderName
-                Message      = if ($cleanMessage) { $cleanMessage } else { "(No description)" }
-            }
+            $results.Add([PSCustomObject]@{
+                    TimeCreated  = $evt.TimeCreated.ToString("yyyy-MM-dd HH:mm:ss")
+                    LogName      = $evt.LogName
+                    Level        = $levelName
+                    EventID      = $evt.Id
+                    ProviderName = $evt.ProviderName
+                    Message      = if ($cleanMessage) { $cleanMessage } else { "(No description)" }
+                })
         }
     }
 
     if ($results.Count -eq 0) {
-        Write-Output "No Critical or Error events found across System/Application logs in the last $HoursBack hour(s)."
-        $payload = @{
-            status  = "pass"
-            summary = "Clean logs: 0 Critical or Error events logged in the past $HoursBack hour(s)."
-            data    = @()
-            errors  = @()
-        }
+        $status = "pass"
+        $summary = "Clean logs: 0 Critical or Error events logged in the past $HoursBack hour(s)."
+        Write-Output $summary
     }
     else {
         # Human-readable table first
-        $results | Format-Table -AutoSize | Out-String | Write-Output
+        $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+        Write-Output $tableOutput.Trim()
+        Write-Output ""
 
-        $payload = @{
-            status  = "warning"
-            summary = "Retrieved $($results.Count) recent Critical/Error event(s) from the past $HoursBack hour(s)."
-            data    = @($results)
-            errors  = @()
-        }
+        $status = "warning"
+        $summary = "Retrieved $($results.Count) recent Critical/Error event(s) from the past $HoursBack hour(s)."
     }
-
-    $payload | ConvertTo-Json -Depth 4 -Compress
 }
 catch {
-    $errPayload = @{
-        status  = "error"
-        summary = "Failed to query Windows Event Log: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-    $errPayload | ConvertTo-Json -Depth 4 -Compress
-    exit 1
+    $status = "error"
+    $summary = "Failed to query Windows Event Log: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
 }
-
+finally {
+    $payload = @{
+        status  = $status
+        summary = $summary
+        data    = @($results)
+        errors  = @($errors)
+    }
+    $payload | ConvertTo-Json -Depth 4 -Compress
+}

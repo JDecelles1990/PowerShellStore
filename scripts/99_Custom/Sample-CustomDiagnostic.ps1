@@ -22,12 +22,18 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
     $arch = $env:PROCESSOR_ARCHITECTURE
     try {
-        $cimArch = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).OSArchitecture
+        $cimArch = (Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop).OSArchitecture
         if ($cimArch) { $arch = $cimArch }
-    } catch {
+    }
+    catch {
         # Fallback to environment variable
     }
 
@@ -38,22 +44,26 @@ try {
         OSArchitecture = $arch
         Timestamp      = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     }
+    $results.Add($envInfo)
 
-    $payload = @{
-        status  = "pass"
-        summary = "Custom diagnostic executed successfully: $Message"
-        data    = @($envInfo)
-        errors  = @()
-    }
+    # Human-readable table before JSON envelope
+    $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+    Write-Output $tableOutput.Trim()
+    Write-Output ""
+
+    $summary = "Custom diagnostic executed successfully: $Message"
 }
 catch {
-    $payload = @{
-        status  = "error"
-        summary = "Custom diagnostic failed: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
+    $status = "error"
+    $summary = "Custom diagnostic failed: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
 }
 finally {
+    $payload = @{
+        status  = $status
+        summary = $summary
+        data    = @($results)
+        errors  = @($errors)
+    }
     $payload | ConvertTo-Json -Depth 4 -Compress
 }

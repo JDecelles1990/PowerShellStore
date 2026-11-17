@@ -17,28 +17,35 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+$status = "pass"
+$summary = ""
+$results = [System.Collections.Generic.List[PSObject]]::new()
+$errors = [System.Collections.Generic.List[string]]::new()
+
 try {
-    $cbsReboot = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-    $wuReboot = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-    
+    $cbsReboot = Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending" -ErrorAction Stop
+    $wuReboot = Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired" -ErrorAction Stop
+
     $fileRename = $false
     try {
-        $sessionMan = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name "PendingFileRenameOperations" -ErrorAction SilentlyContinue
+        $sessionMan = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager" -Name "PendingFileRenameOperations" -ErrorAction Stop
         if ($sessionMan -and $sessionMan.PendingFileRenameOperations) {
             $fileRename = $true
         }
-    } catch {
+    }
+    catch {
         $fileRename = $false
     }
 
     $computerRename = $false
     try {
-        $activeName = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName" -Name "ComputerName" -ErrorAction SilentlyContinue).ComputerName
-        $configName = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName" -Name "ComputerName" -ErrorAction SilentlyContinue).ComputerName
+        $activeName = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName" -Name "ComputerName" -ErrorAction Stop).ComputerName
+        $configName = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName" -Name "ComputerName" -ErrorAction Stop).ComputerName
         if ($activeName -and $configName -and ($activeName -ne $configName)) {
             $computerRename = $true
         }
-    } catch {
+    }
+    catch {
         $computerRename = $false
     }
 
@@ -58,23 +65,24 @@ try {
         PendingFileRenameOperation = $fileRename
         ComputerNameChange         = $computerRename
     }
+    $results.Add($details)
 
+    # Human-readable table before JSON envelope
+    $tableOutput = $results | Format-Table -AutoSize | Out-String -Width 4096
+    Write-Output $tableOutput.Trim()
+    Write-Output ""
+}
+catch {
+    $status = "error"
+    $summary = "Failed to query reboot indicators: $($_.Exception.Message)"
+    $errors.Add($_.Exception.Message)
+}
+finally {
     $payload = @{
         status  = $status
         summary = $summary
-        data    = @($details)
-        errors  = @()
+        data    = @($results)
+        errors  = @($errors)
     }
-}
-catch {
-    $payload = @{
-        status  = "error"
-        summary = "Failed to query reboot indicators: $($_.Exception.Message)"
-        data    = @()
-        errors  = @($_.Exception.Message)
-    }
-}
-finally {
     $payload | ConvertTo-Json -Depth 4 -Compress
 }
-

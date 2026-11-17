@@ -32,9 +32,9 @@ try {
     $cpuPath = "HKLM:\HARDWARE\DESCRIPTION\System\CentralProcessor\0"
     $cpuName = "Unknown CPU"
     $cpuClock = "Unknown"
-    if (Test-Path $cpuPath) {
+    if (Test-Path -Path $cpuPath -ErrorAction Stop) {
         $cpuProps = Get-ItemProperty -Path $cpuPath -ErrorAction SilentlyContinue
-        if ($cpuProps.ProcessorNameString) { $cpuName = $cpuProps.ProcessorNameString.Trim() }
+        if ($cpuProps.ProcessorNameString) { $cpuName = ([string]$cpuProps.ProcessorNameString).Trim() }
         if ($cpuProps."~MHz") { $cpuClock = "$($cpuProps.'~MHz') MHz" }
     }
     $logicalCores = [System.Environment]::ProcessorCount
@@ -45,7 +45,7 @@ try {
     $totalRamGb = [math]::Round($compInfo.TotalPhysicalMemory / 1GB, 2)
     $freeRamGb = [math]::Round($compInfo.AvailablePhysicalMemory / 1GB, 2)
     $usedRamGb = [math]::Round($totalRamGb - $freeRamGb, 2)
-    $pctUsed = [math]::Round(($usedRamGb / $totalRamGb) * 100, 1)
+    $pctUsed = if ($totalRamGb -gt 0) { [math]::Round(($usedRamGb / $totalRamGb) * 100, 1) } else { 0.0 }
 
     # 3. Query BIOS and Motherboard
     $biosPath = "HKLM:\HARDWARE\DESCRIPTION\System\BIOS"
@@ -54,13 +54,13 @@ try {
     $biosVer = "Unknown"
     $biosDate = "Unknown"
     $boardModel = "Unknown"
-    if (Test-Path $biosPath) {
+    if (Test-Path -Path $biosPath -ErrorAction Stop) {
         $bProps = Get-ItemProperty -Path $biosPath -ErrorAction SilentlyContinue
-        if ($bProps.SystemManufacturer) { $sysMfr = $bProps.SystemManufacturer.Trim() }
-        if ($bProps.SystemProductName) { $sysModel = $bProps.SystemProductName.Trim() }
-        if ($bProps.BIOSVersion) { $biosVer = $bProps.BIOSVersion.Trim() }
-        if ($bProps.BIOSReleaseDate) { $biosDate = $bProps.BIOSReleaseDate.Trim() }
-        if ($bProps.BaseBoardProduct) { $boardModel = $bProps.BaseBoardProduct.Trim() }
+        if ($bProps.SystemManufacturer) { $sysMfr = ([string]$bProps.SystemManufacturer).Trim() }
+        if ($bProps.SystemProductName) { $sysModel = ([string]$bProps.SystemProductName).Trim() }
+        if ($bProps.BIOSVersion) { $biosVer = ([string]($bProps.BIOSVersion -join ' ')).Trim() }
+        if ($bProps.BIOSReleaseDate) { $biosDate = ([string]$bProps.BIOSReleaseDate).Trim() }
+        if ($bProps.BaseBoardProduct) { $boardModel = ([string]$bProps.BaseBoardProduct).Trim() }
     }
 
     # 4. Query GPU / Display Adapters

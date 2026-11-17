@@ -60,6 +60,11 @@ try {
         DeviceId         = $deviceId
     }
 
+    # Human-readable table before JSON envelope
+    $tableOutput = @($details) | Format-Table -AutoSize | Out-String -Width 4096
+    Write-Output $tableOutput.Trim()
+    Write-Output ""
+
     $payload = @{
         status  = $status
         summary = $summary
