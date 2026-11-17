@@ -33,14 +33,14 @@ try {
     $cpuName = "Unknown CPU"
     $cpuClock = "Unknown"
     if (Test-Path -Path $cpuPath -ErrorAction Stop) {
-        $cpuProps = Get-ItemProperty -Path $cpuPath -ErrorAction SilentlyContinue
+        $cpuProps = Get-ItemProperty -Path $cpuPath -ErrorAction Stop
         if ($cpuProps.ProcessorNameString) { $cpuName = ([string]$cpuProps.ProcessorNameString).Trim() }
         if ($cpuProps."~MHz") { $cpuClock = "$($cpuProps.'~MHz') MHz" }
     }
     $logicalCores = [System.Environment]::ProcessorCount
 
     # 2. Query Memory via .NET ComputerInfo
-    Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
+    Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction Stop
     $compInfo = New-Object Microsoft.VisualBasic.Devices.ComputerInfo
     $totalRamGb = [math]::Round($compInfo.TotalPhysicalMemory / 1GB, 2)
     $freeRamGb = [math]::Round($compInfo.AvailablePhysicalMemory / 1GB, 2)
@@ -55,7 +55,7 @@ try {
     $biosDate = "Unknown"
     $boardModel = "Unknown"
     if (Test-Path -Path $biosPath -ErrorAction Stop) {
-        $bProps = Get-ItemProperty -Path $biosPath -ErrorAction SilentlyContinue
+        $bProps = Get-ItemProperty -Path $biosPath -ErrorAction Stop
         if ($bProps.SystemManufacturer) { $sysMfr = ([string]$bProps.SystemManufacturer).Trim() }
         if ($bProps.SystemProductName) { $sysModel = ([string]$bProps.SystemProductName).Trim() }
         if ($bProps.BIOSVersion) { $biosVer = ([string]($bProps.BIOSVersion -join ' ')).Trim() }
@@ -63,19 +63,42 @@ try {
         if ($bProps.BaseBoardProduct) { $boardModel = ([string]$bProps.BaseBoardProduct).Trim() }
     }
 
-    # 4. Query GPU / Display Adapters
+    # 4. Query GPU / Display Adapters (try CIM first, then .NET Registry open on 0000.. subkeys)
     $gpuList = [System.Collections.Generic.List[string]]::new()
     if ($IncludeGPU) {
-        $displayClass = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
-        if (Test-Path $displayClass) {
-            $gpuKeys = Get-ChildItem -Path $displayClass -ErrorAction SilentlyContinue |
-                Where-Object { $_.PSChildName -match '^\d{4}$' }
-            foreach ($gk in $gpuKeys) {
-                $desc = $gk.GetValue("DriverDesc")
-                if ($desc -and -not $gpuList.Contains($desc)) {
-                    $gpuList.Add($desc)
+        try {
+            $cimGpus = Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop
+            foreach ($gpu in $cimGpus) {
+                if ($gpu.Name -and -not $gpuList.Contains([string]$gpu.Name)) {
+                    $gpuList.Add([string]$gpu.Name)
                 }
             }
+        }
+        catch {}
+
+        if ($gpuList.Count -eq 0) {
+            try {
+                $dispKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}", $false)
+                if ($dispKey) {
+                    foreach ($subName in $dispKey.GetSubKeyNames()) {
+                        if ($subName -match '^\d{4}$') {
+                            try {
+                                $sub = $dispKey.OpenSubKey($subName, $false)
+                                if ($sub) {
+                                    $desc = $sub.GetValue("DriverDesc")
+                                    if ($desc -and -not $gpuList.Contains([string]$desc)) {
+                                        $gpuList.Add([string]$desc)
+                                    }
+                                    $sub.Close()
+                                }
+                            }
+                            catch {}
+                        }
+                    }
+                    $dispKey.Close()
+                }
+            }
+            catch {}
         }
     }
     $gpuSummary = if ($gpuList.Count -gt 0) { ($gpuList -join ", ") } else { "None detected" }

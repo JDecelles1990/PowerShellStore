@@ -40,8 +40,14 @@ try {
             if (Test-Path -Path $reg.Path -ErrorAction Stop) {
                 $subKeys = Get-ChildItem -Path $reg.Path -ErrorAction Stop
                 foreach ($sk in $subKeys) {
-                    $props = Get-ItemProperty -Path $sk.PSPath -ErrorAction SilentlyContinue
-                    $progId = Split-Path -Path $sk.Name -Leaf
+                    $props = $null
+                    try {
+                        $props = Get-ItemProperty -Path $sk.PSPath -ErrorAction Stop
+                    }
+                    catch {
+                        $props = $null
+                    }
+                    $progId = Split-Path -Path $sk.Name -Leaf -ErrorAction Stop
                     $friendlyName = if ($props -and $props.FriendlyName) { [string]$props.FriendlyName } else { $progId }
                     $loadVal = if ($props -and $null -ne $props.LoadBehavior) { [int]$props.LoadBehavior } else { -1 }
 

@@ -30,7 +30,7 @@ $errors = [System.Collections.Generic.List[string]]::new()
 try {
     # 1. Inspect Modern Click-to-Run Office Registry
     $c2rPath = "HKLM:\SOFTWARE\Microsoft\Office\ClickToRun\Configuration"
-    $hasC2R = Test-Path $c2rPath
+    $hasC2R = Test-Path -Path $c2rPath -ErrorAction Stop
     $productReleaseIds = "None"
     $versionToReport = "N/A"
     $platform = "N/A"
@@ -38,14 +38,17 @@ try {
     $updateChannel = "Standard"
 
     if ($hasC2R) {
-        $c2r = Get-ItemProperty -Path $c2rPath -ErrorAction SilentlyContinue
-        if ($c2r.ProductReleaseIds) { $productReleaseIds = [string]$c2r.ProductReleaseIds }
-        if ($c2r.VersionToReport) { $versionToReport = [string]$c2r.VersionToReport }
-        if ($c2r.Platform) { $platform = [string]$c2r.Platform }
-        if ($c2r.SharedComputerLicensing -eq "1" -or $c2r.SharedComputerLicensing -eq 1) {
-            $sharedLicensing = "Enabled (Shared Computer / RDS)"
+        try {
+            $c2r = Get-ItemProperty -Path $c2rPath -ErrorAction Stop
+            if ($c2r.ProductReleaseIds) { $productReleaseIds = [string]$c2r.ProductReleaseIds }
+            if ($c2r.VersionToReport) { $versionToReport = [string]$c2r.VersionToReport }
+            if ($c2r.Platform) { $platform = [string]$c2r.Platform }
+            if ($c2r.SharedComputerLicensing -eq "1" -or $c2r.SharedComputerLicensing -eq 1) {
+                $sharedLicensing = "Enabled (Shared Computer / RDS)"
+            }
+            if ($c2r.UpdateChannel) { $updateChannel = [string]$c2r.UpdateChannel }
         }
-        if ($c2r.UpdateChannel) { $updateChannel = [string]$c2r.UpdateChannel }
+        catch {}
     }
 
     # 2. Check Volume Licensing via OSPP.vbs if present
@@ -83,8 +86,8 @@ try {
     $signedInAccount = "Unknown / Not signed in"
     try {
         $identPath = "HKCU:\Software\Microsoft\Office\16.0\Common\Identity\Identities"
-        if (Test-Path $identPath) {
-            $subIdentities = Get-ChildItem -Path $identPath -ErrorAction SilentlyContinue
+        if (Test-Path -Path $identPath -ErrorAction Stop) {
+            $subIdentities = Get-ChildItem -Path $identPath -ErrorAction Stop
             if ($subIdentities) {
                 foreach ($idKey in $subIdentities) {
                     $email = $idKey.GetValue("EmailAddress")

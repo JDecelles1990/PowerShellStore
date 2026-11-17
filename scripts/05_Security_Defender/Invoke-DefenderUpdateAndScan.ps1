@@ -31,12 +31,15 @@ $summary = ""
 $scanRecords = [System.Collections.Generic.List[PSObject]]::new()
 $errors = [System.Collections.Generic.List[string]]::new()
 
-$mpCmdRun = Join-Path -Path $env:ProgramFiles -ChildPath "Windows Defender\MpCmdRun.exe"
-$hasMpCmd = [System.IO.File]::Exists($mpCmdRun)
+$scanTriggered = $false
+$sigUpdated = $false
+$threatCount = 0
 
 try {
+    $mpCmdRun = Join-Path -Path $env:ProgramFiles -ChildPath "Windows Defender\MpCmdRun.exe" -ErrorAction Stop
+    $hasMpCmd = [System.IO.File]::Exists($mpCmdRun)
+
     # 1. Update Signatures
-    $sigUpdated = $false
     if ($UpdateSignatures) {
         $updateSuccess = $false
         try {
@@ -118,9 +121,8 @@ try {
     }
 
     # 3. Check for Active Threat Detections
-    $threatCount = 0
     try {
-        $threats = Get-MpThreatDetection -ErrorAction SilentlyContinue
+        $threats = Get-MpThreatDetection -ErrorAction Stop
         if ($threats) {
             $threatCount = ($threats | Measure-Object).Count
         }

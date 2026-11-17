@@ -57,7 +57,7 @@ try {
     # 1. Empty All Recycle Bins
     if ($EmptyRecycleBins) {
         try {
-            Clear-RecycleBin -Force -ErrorAction SilentlyContinue 2>$null
+            Clear-RecycleBin -Force -ErrorAction Stop 2>$null
             $stepLog.Add("Emptied system and user Recycle Bins.")
         }
         catch {
@@ -88,12 +88,12 @@ try {
 
     # 3. Clear All User Profiles Temp Folders
     if ($ClearUserTemps) {
-        $userProfilesRoot = Split-Path -Path $env:USERPROFILE -Parent
-        if (Test-Path $userProfilesRoot) {
+        $userProfilesRoot = Split-Path -Path $env:USERPROFILE -Parent -ErrorAction Stop
+        if (Test-Path -Path $userProfilesRoot -ErrorAction Stop) {
             $cleanedProfiles = 0
             Get-ChildItem -Path $userProfilesRoot -Directory -Force -ErrorAction SilentlyContinue |
                 ForEach-Object {
-                    $uTemp = Join-Path -Path $_.FullName -ChildPath "AppData\Local\Temp"
+                    $uTemp = Join-Path -Path $_.FullName -ChildPath "AppData\Local\Temp" -ErrorAction Stop
                     try {
                         if (Test-Path -LiteralPath $uTemp -ErrorAction Stop) {
                             Get-ChildItem -Path $uTemp -Force -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
@@ -141,7 +141,7 @@ try {
         try {
             $dismProcess = Start-Process -FilePath "dism.exe" `
                 -ArgumentList "/Online /Cleanup-Image /StartComponentCleanup /Quiet /NoRestart" `
-                -Wait -PassThru -NoNewWindow
+                -Wait -PassThru -NoNewWindow -ErrorAction Stop
             if ($dismProcess.ExitCode -eq 0) {
                 $dismOutcome = "Component Store cleaned successfully"
                 $stepLog.Add("DISM Component Store cleanup completed successfully.")
@@ -162,7 +162,7 @@ try {
         try {
             $sfcProcess = Start-Process -FilePath "sfc.exe" `
                 -ArgumentList "/scannow" `
-                -Wait -PassThru -NoNewWindow
+                -Wait -PassThru -NoNewWindow -ErrorAction Stop
             switch ($sfcProcess.ExitCode) {
                 0 { $sfcOutcome = "No integrity violations found." }
                 1 { $sfcOutcome = "Corrupt files were found and successfully repaired." }

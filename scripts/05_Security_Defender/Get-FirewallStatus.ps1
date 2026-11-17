@@ -92,9 +92,9 @@ try {
                 if (-not $matched) { continue }
             }
 
-            $subPath = Join-Path -Path $regRoot -ChildPath $entry.Key
+            $subPath = Join-Path -Path $regRoot -ChildPath $entry.Key -ErrorAction Stop
             if (Test-Path -Path $subPath -ErrorAction Stop) {
-                $pVal = Get-ItemProperty -Path $subPath -ErrorAction SilentlyContinue
+                $pVal = Get-ItemProperty -Path $subPath -ErrorAction Stop
                 $enabledVal = $pVal.EnableFirewall
                 $isEnabled = ($enabledVal -eq 1 -or $enabledVal -eq "1")
                 if (-not $isEnabled) { $disabledProfiles++ }

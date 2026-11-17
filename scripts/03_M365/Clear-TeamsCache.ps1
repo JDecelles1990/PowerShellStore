@@ -32,12 +32,19 @@ try {
 
     # 1. Terminate running Teams processes
     if ($KillRunningProcesses) {
-        $processes = Get-Process -Name "Teams", "ms-teams" -ErrorAction SilentlyContinue
+        $processes = $null
+        try {
+            $processes = Get-Process -Name "Teams", "ms-teams" -ErrorAction Stop
+        }
+        catch {
+            $processes = $null
+        }
         if ($processes) {
             foreach ($p in $processes) {
                 try {
-                    Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-                } catch {}
+                    Stop-Process -Id $p.Id -Force -ErrorAction Stop
+                }
+                catch {}
             }
             $actions.Add("Terminated running Teams processes.")
             Start-Sleep -Seconds 1
@@ -47,17 +54,18 @@ try {
     # 2. Clear Classic Teams Cache (%appdata%\Microsoft\Teams)
     $classicPath = "$env:APPDATA\Microsoft\Teams"
     $classicCleared = $false
-    if (Test-Path $classicPath) {
+    if (Test-Path -Path $classicPath -ErrorAction Stop) {
         $subfolders = @(
             "blob_storage", "databases", "GPUCache", "IndexedDB",
             "Local Storage", "tmp", "Cache", "code cache"
         )
         foreach ($sub in $subfolders) {
-            $target = Join-Path -Path $classicPath -ChildPath $sub
-            if (Test-Path $target) {
+            $target = Join-Path -Path $classicPath -ChildPath $sub -ErrorAction Stop
+            if (Test-Path -Path $target -ErrorAction Stop) {
                 try {
-                    Remove-Item -Path "$target\*" -Recurse -Force -ErrorAction SilentlyContinue
-                } catch {}
+                    Remove-Item -Path "$target\*" -Recurse -Force -ErrorAction Stop
+                }
+                catch {}
             }
         }
         $classicCleared = $true
@@ -67,9 +75,9 @@ try {
     # 3. Clear New Teams v2 Cache (%localappdata%\Packages\MSTeams_8wekyb3d8bbwe)
     $newTeamsRoot = "$env:LOCALAPPDATA\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams"
     $newCleared = $false
-    if (Test-Path $newTeamsRoot) {
+    if (Test-Path -Path $newTeamsRoot -ErrorAction Stop) {
         try {
-            Remove-Item -Path "$newTeamsRoot\*" -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$newTeamsRoot\*" -Recurse -Force -ErrorAction Stop
             $newCleared = $true
             $actions.Add("Purged New Teams (v2) LocalCache files.")
         }
@@ -81,9 +89,10 @@ try {
     # 4. Optional Relaunch
     if ($RelaunchTeams) {
         try {
-            Start-Process "ms-teams:" -ErrorAction SilentlyContinue
+            Start-Process -FilePath "ms-teams:" -ErrorAction Stop
             $actions.Add("Triggered New Teams client launch.")
-        } catch {
+        }
+        catch {
             $warnings.Add("Failed to relaunch Teams: $($_.Exception.Message)")
         }
     }

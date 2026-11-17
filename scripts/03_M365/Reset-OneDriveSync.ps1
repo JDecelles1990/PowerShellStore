@@ -39,10 +39,16 @@ try {
     # 1. Terminate Running OneDrive Process
     $processStopped = $false
     if ($KillRunningProcess) {
-        $procs = Get-Process -Name "OneDrive", "FileCoAuth" -ErrorAction SilentlyContinue
+        $procs = $null
+        try {
+            $procs = Get-Process -Name "OneDrive", "FileCoAuth" -ErrorAction Stop
+        }
+        catch {
+            $procs = $null
+        }
         if ($procs) {
             foreach ($p in $procs) {
-                try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+                try { Stop-Process -Id $p.Id -Force -ErrorAction Stop } catch {}
             }
             $processStopped = $true
             $actionRecords.Add([PSCustomObject]@{
@@ -143,7 +149,7 @@ try {
         # 5. Optional Client Relaunch
         if ($RelaunchOneDrive) {
             try {
-                Start-Process -FilePath $oneDriveExe -ErrorAction SilentlyContinue
+                Start-Process -FilePath $oneDriveExe -ErrorAction Stop
                 $actionRecords.Add([PSCustomObject]@{
                         Action  = "Relaunch Client"
                         Status  = "Success"

@@ -29,7 +29,7 @@ $errors = [System.Collections.Generic.List[string]]::new()
 
 try {
     # Tier 1: Fast .NET PowerStatus Inspection (works in all user contexts)
-    Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
     $pStatus = [System.Windows.Forms.SystemInformation]::PowerStatus
 
     $chargeState = [string]$pStatus.BatteryChargeStatus
@@ -59,10 +59,10 @@ try {
         $chemistry = "Lithium-Ion"
 
         # Tier 2: Attempt powercfg XML report if elevated or accessible
-        $tempXml = Join-Path -Path $env:TEMP -ChildPath "psstore_bat_$([System.IO.Path]::GetRandomFileName()).xml"
+        $tempXml = Join-Path -Path $env:TEMP -ChildPath "psstore_bat_$([System.IO.Path]::GetRandomFileName()).xml" -ErrorAction Stop
         try {
             & powercfg.exe /batteryreport /xml /output $tempXml 2>$null | Out-Null
-            if (Test-Path -Path $tempXml) {
+            if (Test-Path -Path $tempXml -ErrorAction Stop) {
                 [xml]$xmlReport = Get-Content -Path $tempXml -Raw -ErrorAction Stop
                 $batNode = $xmlReport.BatteryReport.Batteries.Battery | Select-Object -First 1
                 if ($batNode) {
@@ -75,9 +75,11 @@ try {
         }
         catch {}
         finally {
-            if (Test-Path -Path $tempXml) {
-                Remove-Item -Path $tempXml -Force -ErrorAction SilentlyContinue
-            }
+            try {
+                if (Test-Path -Path $tempXml -ErrorAction Stop) {
+                    Remove-Item -Path $tempXml -Force -ErrorAction Stop
+                }
+            } catch {}
         }
 
         # Calculate Wear Level

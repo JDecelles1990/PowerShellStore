@@ -46,7 +46,11 @@ function Execute-NetCommand {
         [scriptblock]$ScriptBlock
     )
     try {
+        $global:LASTEXITCODE = 0
         $output = & $ScriptBlock 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw "Command exited with code ${LASTEXITCODE}: $($output.Trim() -replace '\s+', ' ')"
+        }
         $actionRecords.Add([PSCustomObject]@{
             Action      = $ActionName
             Status      = "Success"

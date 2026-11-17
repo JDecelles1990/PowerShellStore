@@ -85,7 +85,13 @@ try {
     # 1. Close or Terminate Running Outlook Processes
     $outlookClosed = $false
     if ($CloseOutlook) {
-        $processes = Get-Process -Name "OUTLOOK", "olk" -ErrorAction SilentlyContinue
+        $processes = $null
+        try {
+            $processes = Get-Process -Name "OUTLOOK", "olk" -ErrorAction Stop
+        }
+        catch {
+            $processes = $null
+        }
         if ($processes) {
             foreach ($proc in $processes) {
                 try {
@@ -94,11 +100,17 @@ try {
             }
             Start-Sleep -Seconds 2
 
-            $remaining = Get-Process -Name "OUTLOOK", "olk" -ErrorAction SilentlyContinue
+            $remaining = $null
+            try {
+                $remaining = Get-Process -Name "OUTLOOK", "olk" -ErrorAction Stop
+            }
+            catch {
+                $remaining = $null
+            }
             if ($remaining) {
                 foreach ($proc in $remaining) {
                     try {
-                        Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                        Stop-Process -Id $proc.Id -Force -ErrorAction Stop
                     } catch {}
                 }
             }

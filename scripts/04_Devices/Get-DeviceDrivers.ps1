@@ -70,38 +70,59 @@ try {
     # Tier 2: Resilient Registry Enumeration (fast, accessible without elevation)
     if (-not $queriedTier1 -or $driversList.Count -eq 0) {
         try {
-            $classRoot = "HKLM:\SYSTEM\CurrentControlSet\Control\Class"
-            if (Test-Path -Path $classRoot) {
-                $subkeys = Get-ChildItem -Path $classRoot -Recurse -Depth 1 -ErrorAction SilentlyContinue |
-                    Where-Object { $_.PSChildName -match '^\d{4}$' }
-
-                foreach ($key in $subkeys) {
+            $classRootKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SYSTEM\CurrentControlSet\Control\Class", $false)
+            if ($classRootKey) {
+                foreach ($className in $classRootKey.GetSubKeyNames()) {
                     if ($driversList.Count -ge $MaxResults) { break }
+                    $ck = $null
+                    try {
+                        $ck = $classRootKey.OpenSubKey($className, $false)
+                        if (-not $ck) { continue }
+                        foreach ($subName in $ck.GetSubKeyNames()) {
+                            if ($driversList.Count -ge $MaxResults) { break }
+                            if ($subName -notmatch '^\d{4}$') { continue }
 
-                    $devDesc = $key.GetValue("DriverDesc")
-                    if (-not $devDesc) { $devDesc = $key.GetValue("DeviceDesc") }
-                    if (-not $devDesc) { continue }
+                            $key = $null
+                            try {
+                                $key = $ck.OpenSubKey($subName, $false)
+                                if (-not $key) { continue }
 
-                    $devClass = [string]$key.GetValue("Class")
-                    if (-not [string]::IsNullOrWhiteSpace($devClass) -and ($DeviceClass -ne "*") -and ($devClass -notlike $DeviceClass)) {
-                        continue
+                                $devDesc = $key.GetValue("DriverDesc")
+                                if (-not $devDesc) { $devDesc = $key.GetValue("DeviceDesc") }
+                                if (-not $devDesc) { continue }
+
+                                $devClass = [string]$key.GetValue("Class")
+                                if (-not [string]::IsNullOrWhiteSpace($devClass) -and ($DeviceClass -ne "*") -and ($devClass -notlike $DeviceClass)) {
+                                    continue
+                                }
+
+                                $provider = [string]$key.GetValue("ProviderName")
+                                $version  = [string]$key.GetValue("DriverVersion")
+                                $date     = [string]$key.GetValue("DriverDate")
+                                $inf      = [string]$key.GetValue("InfPath")
+
+                                $driversList.Add([PSCustomObject]@{
+                                    DeviceName    = [string]$devDesc
+                                    DeviceClass   = if ($devClass) { $devClass } else { "System" }
+                                    Manufacturer  = if ($provider) { $provider } else { "Unknown" }
+                                    DriverVersion = if ($version) { $version } else { "N/A" }
+                                    DriverDate    = if ($date) { $date } else { "N/A" }
+                                    IsSigned      = $true
+                                    InfName       = if ($inf) { $inf } else { "N/A" }
+                                })
+                            }
+                            catch {}
+                            finally {
+                                if ($key) { $key.Close() }
+                            }
+                        }
                     }
-
-                    $provider = [string]$key.GetValue("ProviderName")
-                    $version  = [string]$key.GetValue("DriverVersion")
-                    $date     = [string]$key.GetValue("DriverDate")
-                    $inf      = [string]$key.GetValue("InfPath")
-
-                    $driversList.Add([PSCustomObject]@{
-                        DeviceName    = [string]$devDesc
-                        DeviceClass   = if ($devClass) { $devClass } else { "System" }
-                        Manufacturer  = if ($provider) { $provider } else { "Unknown" }
-                        DriverVersion = if ($version) { $version } else { "N/A" }
-                        DriverDate    = if ($date) { $date } else { "N/A" }
-                        IsSigned      = $true
-                        InfName       = if ($inf) { $inf } else { "N/A" }
-                    })
+                    catch {}
+                    finally {
+                        if ($ck) { $ck.Close() }
+                    }
                 }
+                $classRootKey.Close()
             }
         }
         catch {
@@ -112,7 +133,7 @@ try {
     # Tier 3: DriverQuery fallback (if Tier 1 and 2 returned nothing)
     if ($driversList.Count -eq 0) {
         try {
-            $dqCsv = & driverquery.exe /FO CSV /V 2>$null | ConvertFrom-Csv -ErrorAction SilentlyContinue
+            $dqCsv = & driverquery.exe /FO CSV /V 2>$null | ConvertFrom-Csv -ErrorAction Stop
             if ($dqCsv) {
                 $filteredDq = $dqCsv | Where-Object { $_."Display Name" }
                 if ($DeviceClass -ne "*") {

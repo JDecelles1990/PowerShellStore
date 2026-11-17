@@ -78,8 +78,14 @@ try {
 
         foreach ($cPath in $b.CacheRoots) {
             if (Test-Path -Path $cPath -ErrorAction Stop) {
-                $files = Get-ChildItem -Path $cPath -Recurse -File -ErrorAction SilentlyContinue
-                $folderBytes = if ($files) { ($files | Measure-Object -Property Length -Sum).Sum } else { 0 }
+                $files = @()
+                try {
+                    $files = @(Get-ChildItem -Path $cPath -Recurse -File -ErrorAction Stop)
+                }
+                catch {
+                    $files = @()
+                }
+                $folderBytes = if ($files.Count -gt 0) { ($files | Measure-Object -Property Length -Sum).Sum } else { 0 }
                 $folderMb = if ($folderBytes) { [math]::Round([double]$folderBytes / 1MB, 2) } else { 0.0 }
 
                 try {

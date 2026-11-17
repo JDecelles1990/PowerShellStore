@@ -40,16 +40,27 @@ try {
         $primaryGpu = [string]$gpuList[0].Name
     }
     else {
-        # Registry fallback for Display Adapter Name
+        # Registry fallback for Display Adapter Name (safe .NET read-only open avoids ACL errors on Properties subkey)
         try {
-            $displayClass = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
-            if (Test-Path -Path $displayClass -ErrorAction Stop) {
-                $gk = Get-ChildItem -Path $displayClass -ErrorAction Stop |
-                    Where-Object { $_.PSChildName -match '^\d{4}$' } | Select-Object -First 1
-                if ($gk) {
-                    $desc = $gk.GetValue("DriverDesc")
-                    if ($desc) { $primaryGpu = [string]$desc }
+            $dispKey = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}", $false)
+            if ($dispKey) {
+                foreach ($subName in $dispKey.GetSubKeyNames()) {
+                    if ($subName -match '^\d{4}$') {
+                        try {
+                            $sub = $dispKey.OpenSubKey($subName, $false)
+                            if ($sub) {
+                                $desc = $sub.GetValue("DriverDesc")
+                                $sub.Close()
+                                if ($desc) {
+                                    $primaryGpu = [string]$desc
+                                    break
+                                }
+                            }
+                        }
+                        catch {}
+                    }
                 }
+                $dispKey.Close()
             }
         }
         catch {}

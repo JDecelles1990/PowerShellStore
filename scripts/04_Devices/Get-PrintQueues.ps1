@@ -50,7 +50,7 @@ try {
 
             if ($IncludeJobs -and $jobCount -gt 0) {
                 try {
-                    $jobs = Get-PrintJob -PrinterName $p.Name -ErrorAction SilentlyContinue
+                    $jobs = Get-PrintJob -PrinterName $p.Name -ErrorAction Stop
                     if ($jobs) {
                         $jobDescList = [System.Collections.Generic.List[string]]::new()
                         foreach ($j in $jobs) {
@@ -100,16 +100,16 @@ try {
     # Tier 2: Resilient .NET System.Drawing.Printing.PrinterSettings (works unprivileged)
     if (-not $queriedViaCim) {
         try {
-            Add-Type -AssemblyName System.Drawing -ErrorAction SilentlyContinue
+            Add-Type -AssemblyName System.Drawing -ErrorAction Stop
             $defaultPrinter = try { (New-Object System.Drawing.Printing.PrinterSettings).PrinterName } catch { "" }
             $installed = [System.Drawing.Printing.PrinterSettings]::InstalledPrinters
 
             # Estimate queued jobs from Spooler PRINTERS folder (.SHD / .SPL files)
-            $spoolDir = Join-Path -Path $env:SystemRoot -ChildPath "System32\spool\PRINTERS"
+            $spoolDir = Join-Path -Path $env:SystemRoot -ChildPath "System32\spool\PRINTERS" -ErrorAction Stop
             $spoolFilesCount = 0
-            if (Test-Path -Path $spoolDir) {
+            if (Test-Path -Path $spoolDir -ErrorAction Stop) {
                 try {
-                    $spoolFiles = Get-ChildItem -Path $spoolDir -File -Force -ErrorAction SilentlyContinue
+                    $spoolFiles = Get-ChildItem -Path $spoolDir -File -Force -ErrorAction Stop
                     if ($spoolFiles) {
                         $spoolFilesCount = ($spoolFiles | Where-Object { $_.Extension -eq ".shd" }).Count
                     }
