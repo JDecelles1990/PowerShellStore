@@ -102,12 +102,13 @@ class SidebarView(QFrame):
         self.startup_checkbox.toggled.connect(self.startup_toggled.emit)
         layout.addWidget(self.startup_checkbox)
 
-        # Shift+F8 Hotkey Indicator Badge
+        # Win+F8 Hotkey Indicator Badge
         hotkey_box = QFrame()
         hotkey_box.setStyleSheet(
             "background-color: #111827; border: 1px solid #374151; "
             "border-radius: 4px; padding: 4px 6px;"
         )
+        hotkey_box.setToolTip("Press Win+F8 anywhere in Windows to show or minimize PowerShellStore")
         hotkey_layout = QHBoxLayout(hotkey_box)
         hotkey_layout.setContentsMargins(4, 2, 4, 2)
         hotkey_layout.setSpacing(6)
@@ -116,7 +117,7 @@ class SidebarView(QFrame):
         hotkey_icon.setStyleSheet("font-size: 11px;")
         hotkey_layout.addWidget(hotkey_icon)
 
-        hotkey_text = QLabel("Hotkey: Shift+F8")
+        hotkey_text = QLabel("Hotkey: Win+F8")
         hotkey_text.setStyleSheet("color: #60a5fa; font-size: 11px; font-weight: bold; font-family: Consolas, monospace;")
         hotkey_layout.addWidget(hotkey_text, 1)
         layout.addWidget(hotkey_box)

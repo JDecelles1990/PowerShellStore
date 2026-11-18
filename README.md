@@ -23,7 +23,7 @@ A Windows-focused **PySide6** desktop workstation built for IT helpdesk and Mana
   - **Save Report...:** Exports self-contained offline `.html` audit reports to disk.
   - Works on both live runs and historical executions reloaded from **Run History**.
 - **Windows Desktop & Tray Integration:**
-  - **Global `Shift+F8` Hotkey (`services/hotkey_service.py`):** Show/hide PowerShellStore from anywhere in Windows using Win32 `RegisterHotKey`.
+  - **Global `Win+F8` Hotkey (`services/hotkey_service.py`):** Bring PowerShellStore onto the screen or minimize it from anywhere in Windows using Win32 `RegisterHotKey`.
   - **Start with Windows (`services/startup_service.py`):** Toggle launch-on-login via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` using silent `pythonw.exe main.py --startup` tray startup.
   - **System Tray (`QSystemTrayIcon`):** Minimize-to-tray on close, toggle visibility, toggle startup setting, or quit cleanly.
 - **Modern Dark Workstation UI (`ui/`):**
@@ -55,7 +55,7 @@ PowerShellStore/
 │   ├── clipboard_service.py     # Raw copy & in-memory param() block injector for RMM deployment
 │   ├── runner.py                # Non-blocking QProcess runner, UAC elevation & output envelope parser
 │   ├── report_service.py        # Rich-text HTML + Markdown ticket evidence generator & file exporter
-│   ├── hotkey_service.py        # System-wide Shift+F8 Win32 RegisterHotKey & native event filter
+│   ├── hotkey_service.py        # System-wide Win+F8 Win32 RegisterHotKey & native event filter
 │   └── startup_service.py       # Windows HKCU Run registry toggle (pythonw.exe silent startup)
 ├── ui/
 │   ├── launcher_view.py         # Main 3-pane coordinator, tray icon, opacity slider & watcher wiring
@@ -109,7 +109,7 @@ PowerShellStore/
 # Normal windowed launch
 python main.py
 
-# Silent background startup to system tray (press Shift+F8 to toggle)
+# Silent background startup to system tray (press Win+F8 to toggle)
 pythonw main.py --startup
 ```
 

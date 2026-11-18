@@ -45,7 +45,7 @@ def main() -> None:
     if not start_hidden:
         window.show()
     else:
-        logging.info("PowerShellStore started in background/tray mode. Press Shift+F8 to display.")
+        logging.info("PowerShellStore started in background/tray mode. Press Win+F8 to display.")
 
     sys.exit(app.exec())
 

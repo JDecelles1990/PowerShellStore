@@ -143,11 +143,11 @@ class LauncherView(QMainWindow):
         self.shortcut_sidebar = QShortcut(QKeySequence("Ctrl+B"), self)
         self.shortcut_sidebar.activated.connect(self.toggle_sidebar)
 
-        # Register system-wide Shift+F8 hotkey
+        # Register system-wide Win+F8 hotkey
         try:
             self.hotkey_manager.register(int(self.winId()))
         except Exception as exc:
-            logger.warning("Could not register global Shift+F8 hotkey: %s", exc)
+            logger.warning("Could not register global Win+F8 hotkey: %s", exc)
 
     def _init_inspector_ui(self) -> None:
         layout = QVBoxLayout(self.inspector_frame)
@@ -285,7 +285,7 @@ class LauncherView(QMainWindow):
         self.catalog_view.toggle_sidebar_requested.connect(self.toggle_sidebar)
         self.catalog_view.script_selected.connect(self._on_script_selected)
 
-        # Global Hotkey signal (Shift+F8)
+        # Global Hotkey signal (Win+F8)
         self.hotkey_manager.triggered.connect(self.toggle_window_visibility)
 
         # Console and Report signals
@@ -484,7 +484,7 @@ class LauncherView(QMainWindow):
         self.status_bar.showMessage(f"Execution Error: {message}", 5000)
 
     # -------------------------------------------------------------------------
-    # Tray Icon, Global Hotkey (Shift+F8), and Startup Handlers
+    # Tray Icon, Global Hotkey (Win+F8), and Startup Handlers
     # -------------------------------------------------------------------------
 
     def _create_app_icon(self) -> QIcon:
@@ -510,7 +510,7 @@ class LauncherView(QMainWindow):
             return
 
         self.tray_icon = QSystemTrayIcon(self.app_icon, self)
-        self.tray_icon.setToolTip("PowerShellStore — Press Shift+F8 to Open")
+        self.tray_icon.setToolTip("PowerShellStore — Press Win+F8 to Open or Minimize")
 
         menu = QMenu(self)
         menu.setStyleSheet(
@@ -520,7 +520,7 @@ class LauncherView(QMainWindow):
             "QMenu::separator { height: 1px; background-color: #374151; margin: 4px 0px; }"
         )
 
-        self.action_tray_toggle = QAction("Show / Hide PowerShellStore (Shift+F8)", self)
+        self.action_tray_toggle = QAction("Show / Minimize PowerShellStore (Win+F8)", self)
         font = self.action_tray_toggle.font()
         font.setBold(True)
         self.action_tray_toggle.setFont(font)
@@ -568,14 +568,18 @@ class LauncherView(QMainWindow):
         self.status_bar.showMessage(status_msg, 3000)
 
     def toggle_window_visibility(self) -> None:
-        """Toggles the window between foreground active and minimized/hidden."""
+        """Toggles the window between foreground active on screen and minimized."""
         if self.isHidden() or self.isMinimized() or not self.isActiveWindow():
-            self.showNormal()
+            self.setWindowState(
+                (self.windowState() & ~Qt.WindowState.WindowMinimized)
+                | Qt.WindowState.WindowActive
+            )
+            self.show()
             self.raise_()
             self.activateWindow()
             bring_window_to_foreground(int(self.winId()))
         else:
-            self.hide()
+            self.showMinimized()
 
     def closeEvent(self, event) -> None:
         """Intercepts window close: minimizes to system tray unless force quit is invoked."""
@@ -589,7 +593,7 @@ class LauncherView(QMainWindow):
                 if self.tray_icon.supportsMessages():
                     self.tray_icon.showMessage(
                         "PowerShellStore",
-                        "Application minimized to system tray. Press Shift+F8 anytime to open.",
+                        "Application minimized to system tray. Press Win+F8 anytime to open.",
                         QSystemTrayIcon.MessageIcon.Information,
                         2000,
                     )
