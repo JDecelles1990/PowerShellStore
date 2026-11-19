@@ -48,7 +48,8 @@ class SidebarView(QFrame):
         layout.addWidget(search_label)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Filter title or synopsis...")
+        self.search_input.setPlaceholderText("Filter title or synopsis... (Ctrl+F)")
+        self.search_input.setToolTip("Focus search with Ctrl+F; press Esc to clear")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._on_filter_changed)
         layout.addWidget(self.search_input)
@@ -89,6 +90,7 @@ class SidebarView(QFrame):
 
         # Sync Catalog Button
         self.sync_button = QPushButton("🔄 Sync Catalog")
+        self.sync_button.setToolTip("Rescan scripts/ folder and refresh SQLite catalog (F5)")
         self.sync_button.clicked.connect(self.sync_requested.emit)
         layout.addWidget(self.sync_button)
 

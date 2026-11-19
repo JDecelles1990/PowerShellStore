@@ -47,21 +47,25 @@ class ConsoleView(QTabWidget):
         self.results_tab = QWidget()
         self._init_results_tab()
         self.addTab(self.results_tab, "Structured Results")
+        self.setTabToolTip(0, "Structured Results (Ctrl+1)")
 
         # Tab 2: Raw Console
         self.raw_tab = QWidget()
         self._init_raw_tab()
         self.addTab(self.raw_tab, "Raw Console")
+        self.setTabToolTip(1, "Raw Console (Ctrl+2)")
 
         # Tab 3: Script Source Code
         self.code_tab = QWidget()
         self._init_code_tab()
         self.addTab(self.code_tab, "Script Source")
+        self.setTabToolTip(2, "Script Source (Ctrl+3)")
 
         # Tab 4: Execution History
         self.history_tab = QWidget()
         self._init_history_tab()
         self.addTab(self.history_tab, "Run History")
+        self.setTabToolTip(3, "Run History (Ctrl+4)")
 
     def _init_results_tab(self) -> None:
         layout = QVBoxLayout(self.results_tab)
@@ -90,7 +94,7 @@ class ConsoleView(QTabWidget):
         self.copy_report_btn = QPushButton("📋 Copy Ticket Report")
         self.copy_report_btn.setObjectName("ReportButton")
         self.copy_report_btn.setToolTip(
-            "Copies formatted rich-text ticket report with audit header and structured evidence to Windows Clipboard"
+            "Copies formatted rich-text ticket report with audit header and structured evidence to Windows Clipboard (Ctrl+Shift+T)"
         )
         self.copy_report_btn.setEnabled(False)
         self.copy_report_btn.clicked.connect(self._on_copy_report_clicked)
@@ -98,7 +102,7 @@ class ConsoleView(QTabWidget):
 
         self.save_report_btn = QPushButton("💾 Save Report...")
         self.save_report_btn.setObjectName("ReportButton")
-        self.save_report_btn.setToolTip("Exports self-contained HTML audit report to disk")
+        self.save_report_btn.setToolTip("Exports self-contained HTML audit report to disk (Ctrl+S)")
         self.save_report_btn.setEnabled(False)
         self.save_report_btn.clicked.connect(self._on_save_report_clicked)
         metrics_bar.addWidget(self.save_report_btn)
@@ -153,10 +157,11 @@ class ConsoleView(QTabWidget):
 
         toolbar = QHBoxLayout()
         toolbar.addStretch()
-        clear_btn = QPushButton("Clear Console")
-        clear_btn.setStyleSheet("font-size: 11px; padding: 2px 8px;")
-        clear_btn.clicked.connect(self.clear_raw_output)
-        toolbar.addWidget(clear_btn)
+        self.clear_console_btn = QPushButton("Clear Console")
+        self.clear_console_btn.setToolTip("Clear Raw Console output (Ctrl+L)")
+        self.clear_console_btn.setStyleSheet("font-size: 11px; padding: 2px 8px;")
+        self.clear_console_btn.clicked.connect(self.clear_raw_output)
+        toolbar.addWidget(self.clear_console_btn)
         layout.addLayout(toolbar)
 
         self.raw_console = QPlainTextEdit()

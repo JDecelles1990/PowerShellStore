@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 from pathlib import Path
 
@@ -138,10 +139,65 @@ class LauncherView(QMainWindow):
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready")
 
+    def _register_shortcut(
+        self,
+        name: str,
+        keys: str | list[str],
+        callback: Callable[[], None],
+    ) -> QShortcut:
+        """Registers a window-scoped keyboard shortcut and tracks it in self.shortcuts."""
+        key_list = [keys] if isinstance(keys, str) else keys
+        shortcut = QShortcut(self)
+        shortcut.setKeys([QKeySequence(k) for k in key_list])
+        shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        shortcut.activated.connect(callback)
+        self.shortcuts[name] = shortcut
+        return shortcut
+
     def _init_shortcuts(self) -> None:
-        # Ctrl+B toggles sidebar collapse/expand
-        self.shortcut_sidebar = QShortcut(QKeySequence("Ctrl+B"), self)
-        self.shortcut_sidebar.activated.connect(self.toggle_sidebar)
+        self.shortcuts: dict[str, QShortcut] = {}
+
+        # Navigation & catalog shortcuts
+        self.shortcut_sidebar = self._register_shortcut(
+            "toggle_sidebar", "Ctrl+B", self.toggle_sidebar
+        )
+        self._register_shortcut("focus_search", "Ctrl+F", self._focus_search_input)
+        self._register_shortcut("sync_catalog", "F5", self.sync_and_refresh)
+        self._register_shortcut("escape_action", "Esc", self._handle_escape)
+
+        # Core technician script actions & parameters
+        self._register_shortcut("copy_raw_script", "Ctrl+Shift+C", self._on_copy_raw_clicked)
+        self._register_shortcut("copy_rmm_script", "Ctrl+Shift+R", self._on_copy_rmm_clicked)
+        self._register_shortcut(
+            "run_local", ["Ctrl+Return", "Ctrl+Enter"], self._shortcut_run_local
+        )
+        self._register_shortcut("stop_execution", "Shift+F5", self._shortcut_stop_execution)
+        self._register_shortcut(
+            "reset_parameters", "Ctrl+Alt+R", self._shortcut_reset_parameters
+        )
+
+        # Workstation tab switching & reporting shortcuts
+        self._register_shortcut("tab_results", "Ctrl+1", lambda: self._switch_console_tab(0))
+        self._register_shortcut(
+            "tab_raw_console", "Ctrl+2", lambda: self._switch_console_tab(1)
+        )
+        self._register_shortcut(
+            "tab_script_source", "Ctrl+3", lambda: self._switch_console_tab(2)
+        )
+        self._register_shortcut(
+            "tab_run_history", "Ctrl+4", lambda: self._switch_console_tab(3)
+        )
+        self._register_shortcut("copy_ticket_report", "Ctrl+Shift+T", self._shortcut_copy_report)
+        self._register_shortcut("save_html_report", "Ctrl+S", self._shortcut_save_report)
+        self._register_shortcut("clear_console", "Ctrl+L", self._shortcut_clear_console)
+
+        # Window opacity & application lifecycle shortcuts
+        self._register_shortcut(
+            "opacity_increase", ["Ctrl+=", "Ctrl++"], lambda: self._adjust_opacity(5)
+        )
+        self._register_shortcut("opacity_decrease", "Ctrl+-", lambda: self._adjust_opacity(-5))
+        self._register_shortcut("opacity_reset", "Ctrl+0", self._reset_opacity)
+        self._register_shortcut("quit_app", "Ctrl+Q", self.quit_application)
 
         # Register system-wide Win+F8 hotkey
         try:
@@ -178,7 +234,7 @@ class LauncherView(QMainWindow):
         self.opacity_slider.setRange(60, 100)
         self.opacity_slider.setValue(100)
         self.opacity_slider.setFixedWidth(80)
-        self.opacity_slider.setToolTip("Adjust window opacity (60% - 100%)")
+        self.opacity_slider.setToolTip("Adjust window opacity (60% - 100%) — Ctrl+= / Ctrl+- / Ctrl+0")
         self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
         opacity_layout.addWidget(self.opacity_slider)
 
@@ -232,24 +288,25 @@ class LauncherView(QMainWindow):
         action_bar.setSpacing(8)
 
         self.copy_raw_btn = QPushButton("📋 Copy Raw Script")
-        self.copy_raw_btn.setToolTip("Copies exact .ps1 file from disk to the Windows Clipboard")
+        self.copy_raw_btn.setToolTip("Copies exact .ps1 file from disk to the Windows Clipboard (Ctrl+Shift+C)")
         self.copy_raw_btn.clicked.connect(self._on_copy_raw_clicked)
         action_bar.addWidget(self.copy_raw_btn)
 
         self.copy_rmm_btn = QPushButton("⚡ Copy RMM-Ready Script")
         self.copy_rmm_btn.setObjectName("PrimaryButton")
-        self.copy_rmm_btn.setToolTip("Injects custom UI parameter values into param() defaults and copies to clipboard")
+        self.copy_rmm_btn.setToolTip("Injects custom UI parameter values into param() defaults and copies to clipboard (Ctrl+Shift+R)")
         self.copy_rmm_btn.clicked.connect(self._on_copy_rmm_clicked)
         action_bar.addWidget(self.copy_rmm_btn)
 
         self.run_local_btn = QPushButton("▶ Test Locally on My PC")
         self.run_local_btn.setObjectName("SuccessButton")
-        self.run_local_btn.setToolTip("Executes script in non-blocking test sandbox via QProcess")
+        self.run_local_btn.setToolTip("Executes script in non-blocking test sandbox via QProcess (Ctrl+Enter)")
         self.run_local_btn.clicked.connect(self._on_run_local_clicked)
         action_bar.addWidget(self.run_local_btn)
 
         self.stop_btn = QPushButton("⏹ Stop")
         self.stop_btn.setObjectName("DangerButton")
+        self.stop_btn.setToolTip("Stops the currently running local script (Shift+F5 or Esc)")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.runner.stop_execution)
         action_bar.addWidget(self.stop_btn)
@@ -313,6 +370,81 @@ class LauncherView(QMainWindow):
         """Adjusts the application window opacity from 60% to 100%."""
         self.setWindowOpacity(value / 100.0)
         self.opacity_label.setText(f"{value}%")
+
+    def _focus_search_input(self) -> None:
+        """Expands the sidebar if collapsed and focuses the script search input."""
+        if not self._sidebar_expanded:
+            self.toggle_sidebar()
+        self.sidebar.search_input.setFocus()
+        self.sidebar.search_input.selectAll()
+
+    def _handle_escape(self) -> None:
+        """Stops a running script if executing; otherwise clears active search filter."""
+        if self.runner.is_running:
+            self.runner.stop_execution()
+            self.status_bar.showMessage("Stopping running script...", 2500)
+        elif self.sidebar.search_input.text():
+            self.sidebar.search_input.clear()
+            self.catalog_view.table.setFocus()
+            self.status_bar.showMessage("Search filter cleared", 2000)
+        elif self.sidebar.search_input.hasFocus():
+            self.catalog_view.table.setFocus()
+
+    def _shortcut_run_local(self) -> None:
+        """Runs the selected script locally via shortcut when no run is active."""
+        if self._current_script and not self.runner.is_running:
+            self._on_run_local_clicked()
+
+    def _shortcut_stop_execution(self) -> None:
+        """Stops an active local execution via shortcut."""
+        if self.runner.is_running:
+            self.runner.stop_execution()
+
+    def _shortcut_reset_parameters(self) -> None:
+        """Resets configurable parameters to script defaults."""
+        if self._current_script and self._current_script.params:
+            self.param_form.reset_to_defaults()
+            self.status_bar.showMessage("↺ Parameters reset to script defaults", 2500)
+
+    def _switch_console_tab(self, index: int) -> None:
+        """Switches the workstation ConsoleView tab by index."""
+        if 0 <= index < self.console_view.count():
+            self.console_view.setCurrentIndex(index)
+
+    def _shortcut_copy_report(self) -> None:
+        """Copies rich-text ticket report if a result is loaded."""
+        if self.console_view.copy_report_btn.isEnabled():
+            self.console_view._on_copy_report_clicked()
+        else:
+            self.status_bar.showMessage(
+                "No execution result loaded to copy as a ticket report.", 3000
+            )
+
+    def _shortcut_save_report(self) -> None:
+        """Opens the save HTML audit report dialog if a result is loaded."""
+        if self.console_view.save_report_btn.isEnabled():
+            self.console_view._on_save_report_clicked()
+        else:
+            self.status_bar.showMessage("No execution result loaded to save.", 3000)
+
+    def _shortcut_clear_console(self) -> None:
+        """Clears the Raw Console output."""
+        self.console_view.clear_raw_output()
+        self.status_bar.showMessage("Raw console cleared", 2000)
+
+    def _adjust_opacity(self, delta: int) -> None:
+        """Steps window opacity by delta percentage points, clamped within slider bounds."""
+        new_val = max(
+            self.opacity_slider.minimum(),
+            min(self.opacity_slider.maximum(), self.opacity_slider.value() + delta),
+        )
+        self.opacity_slider.setValue(new_val)
+        self.status_bar.showMessage(f"Window opacity: {new_val}%", 2000)
+
+    def _reset_opacity(self) -> None:
+        """Resets window opacity back to 100%."""
+        self.opacity_slider.setValue(100)
+        self.status_bar.showMessage("Window opacity reset to 100%", 2000)
 
     def sync_and_refresh(self, show_toast: bool = True) -> None:
         summary = self.scanner.sync_catalog()
@@ -535,7 +667,7 @@ class LauncherView(QMainWindow):
 
         menu.addSeparator()
 
-        action_quit = QAction("Exit PowerShellStore", self)
+        action_quit = QAction("Exit PowerShellStore (Ctrl+Q)", self)
         action_quit.triggered.connect(self.quit_application)
         menu.addAction(action_quit)
 

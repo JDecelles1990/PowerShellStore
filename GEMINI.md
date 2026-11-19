@@ -157,3 +157,6 @@ When a script gathers multi-item inventory or tabular diagnostic data (e.g., dev
   1. **Copy Raw Script to Clipboard:** Copies the exact `.ps1` file content from disk (`QGuiApplication.clipboard().setText()`).
   2. **Copy RMM-Ready Script (With Injected Parameters):** Reads UI parameter form values, injects them directly into the script's `param()` defaults in memory, and copies a standalone ready-to-run script.
   3. **Test Locally on My PC:** Executes the script via non-blocking `QProcess` in a local sandbox with elevation awareness and a safety gate for `remediation` scripts.
+- **Keyboard Shortcuts Documentation Rule (Mandatory):**
+  - Whenever a keyboard shortcut (global OS hotkey or in-app `QShortcut`) is assigned, modified, or removed for any function or UI action, you **MUST** document it in the **Keyboard Shortcuts** section of `README.md` in the same change.
+  - Record the exact key combination, scope (`Global` or `In-App`), target action/function, and any context-dependent behavior, and update the corresponding widget tooltip so shortcuts stay discoverable in the UI.

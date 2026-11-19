@@ -41,6 +41,7 @@ class ParameterFormWidget(QFrame):
         header_layout.addStretch()
 
         self.reset_btn = QPushButton("↺ Reset Defaults")
+        self.reset_btn.setToolTip("Reset all parameters to script defaults (Ctrl+Alt+R)")
         self.reset_btn.setStyleSheet("font-size: 11px; padding: 3px 8px;")
         self.reset_btn.clicked.connect(self.reset_to_defaults)
         header_layout.addWidget(self.reset_btn)
