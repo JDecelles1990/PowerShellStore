@@ -220,6 +220,10 @@ QHeaderView::section {
     padding: 8px;
     font-weight: 600;
 }
+QHeaderView::section:hover {
+    background-color: #374151;
+    color: #f3f4f6;
+}
 
 /* Tab Widget */
 QTabWidget::pane {
@@ -272,6 +276,20 @@ QCheckBox::indicator {
 QCheckBox::indicator:checked {
     background-color: #2563eb;
     border: 1px solid #3b82f6;
+}
+QTableWidget::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1px solid #4b5563;
+    background-color: #111827;
+}
+QTableWidget::indicator:hover {
+    border: 1px solid #60a5fa;
+}
+QTableWidget::indicator:checked {
+    background-color: #2563eb;
+    border: 2px solid #93c5fd;
 }
 
 /* Badges and Labels */

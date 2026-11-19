@@ -127,6 +127,30 @@ class ParameterFormWidget(QFrame):
 
         return values
 
+    def set_parameter_values(self, values: dict[str, Any]) -> None:
+        """Applies stored parameter values onto the current form widgets without signal loops."""
+        if not values:
+            return
+        for param in self._param_definitions:
+            name = param.get("name", "")
+            if name not in values:
+                continue
+            param_type = str(param.get("type", "string")).lower()
+            widget = self._input_widgets.get(name)
+            if not widget:
+                continue
+            val = values[name]
+            widget.blockSignals(True)
+            try:
+                if param_type == "bool" and isinstance(widget, QCheckBox):
+                    widget.setChecked(bool(val))
+                elif param_type in ("int", "integer") and isinstance(widget, QSpinBox):
+                    widget.setValue(int(val))
+                elif isinstance(widget, QLineEdit):
+                    widget.setText(str(val))
+            finally:
+                widget.blockSignals(False)
+
     def reset_to_defaults(self) -> None:
         if not self._current_script:
             return

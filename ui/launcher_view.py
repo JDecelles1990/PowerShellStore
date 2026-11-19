@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 from pathlib import Path
+from typing import Any
 
-from PySide6.QtCore import QFileSystemWatcher, Qt
+from PySide6.QtCore import QFileSystemWatcher, Qt, QUrl
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QDesktopServices,
     QFont,
     QIcon,
     QKeySequence,
@@ -82,6 +84,7 @@ class LauncherView(QMainWindow):
         )
 
         self._current_script: ScriptRecord | None = None
+        self._saved_params: dict[str, dict[str, Any]] = {}
         self._sidebar_expanded: bool = True
         self._force_quit: bool = False
 
@@ -161,9 +164,19 @@ class LauncherView(QMainWindow):
         self.shortcut_sidebar = self._register_shortcut(
             "toggle_sidebar", "Ctrl+B", self.toggle_sidebar
         )
+        self._register_shortcut("open_scripts_folder", "Ctrl+O", self.open_scripts_folder)
         self._register_shortcut("focus_search", "Ctrl+F", self._focus_search_input)
         self._register_shortcut("sync_catalog", "F5", self.sync_and_refresh)
         self._register_shortcut("escape_action", "Esc", self._handle_escape)
+        self._register_shortcut(
+            "check_all_visible", "Ctrl+Shift+A", self._shortcut_check_all_visible
+        )
+        self._register_shortcut(
+            "check_read_only_visible", "Ctrl+Shift+O", self._shortcut_check_read_only_visible
+        )
+        self._register_shortcut(
+            "clear_checked_scripts", "Ctrl+Shift+D", self._shortcut_clear_checked
+        )
 
         # Core technician script actions & parameters
         self._register_shortcut("copy_raw_script", "Ctrl+Shift+C", self._on_copy_raw_clicked)
@@ -340,7 +353,12 @@ class LauncherView(QMainWindow):
         self.sidebar.sync_requested.connect(self.sync_and_refresh)
         self.sidebar.startup_toggled.connect(self._on_sidebar_startup_toggled)
         self.catalog_view.toggle_sidebar_requested.connect(self.toggle_sidebar)
+        self.catalog_view.open_scripts_folder_requested.connect(self.open_scripts_folder)
         self.catalog_view.script_selected.connect(self._on_script_selected)
+        self.catalog_view.checked_scripts_changed.connect(self._on_checked_scripts_changed)
+
+        # Parameter memory across script selection switching
+        self.param_form.values_changed.connect(self._on_param_values_changed)
 
         # Global Hotkey signal (Win+F8)
         self.hotkey_manager.triggered.connect(self.toggle_window_visibility)
@@ -350,6 +368,7 @@ class LauncherView(QMainWindow):
 
         # Runner signals
         self.runner.started.connect(self._on_run_started)
+        self.runner.batch_progress.connect(self._on_batch_progress)
         self.runner.output_received.connect(self.console_view.append_raw_output)
         self.runner.finished.connect(self._on_run_finished)
         self.runner.error_occurred.connect(self._on_run_error)
@@ -365,6 +384,26 @@ class LauncherView(QMainWindow):
             else "Sidebar collapsed (more space for catalog & workstation)"
         )
         self.status_bar.showMessage(state_msg, 2500)
+
+    def open_scripts_folder(self) -> None:
+        """Opens the local scripts/ catalog directory in Windows File Explorer."""
+        scripts_dir = self.scanner.scripts_dir.resolve()
+        try:
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            opened = QDesktopServices.openUrl(QUrl.fromLocalFile(str(scripts_dir)))
+        except Exception as exc:
+            logger.warning("Failed to open scripts folder %s: %s", scripts_dir, exc)
+            opened = False
+
+        if opened:
+            self.status_bar.showMessage(f"📂 Opened scripts catalog folder: {scripts_dir}", 4000)
+        else:
+            QMessageBox.warning(
+                self,
+                "Open Folder Failed",
+                f"Could not open the scripts catalog folder:\n{scripts_dir}",
+            )
+            self.status_bar.showMessage("Failed to open scripts catalog folder.", 4000)
 
     def _on_opacity_changed(self, value: int) -> None:
         """Adjusts the application window opacity from 60% to 100%."""
@@ -391,9 +430,61 @@ class LauncherView(QMainWindow):
             self.catalog_view.table.setFocus()
 
     def _shortcut_run_local(self) -> None:
-        """Runs the selected script locally via shortcut when no run is active."""
-        if self._current_script and not self.runner.is_running:
+        """Runs the checked scripts or selected script locally via shortcut when idle."""
+        targets = self.catalog_view.get_checked_scripts() or (
+            [self._current_script] if self._current_script else []
+        )
+        if targets and not self.runner.is_running:
             self._on_run_local_clicked()
+
+    def _shortcut_check_all_visible(self) -> None:
+        """Checks all currently visible scripts in the catalog table."""
+        self.catalog_view.check_all_visible()
+        count = len(self.catalog_view._scripts)
+        self.status_bar.showMessage(f"Checked {count} visible script(s)", 2500)
+
+    def _shortcut_check_read_only_visible(self) -> None:
+        """Checks all currently visible READ-ONLY scripts in the catalog table."""
+        count = self.catalog_view.check_read_only_visible()
+        self.status_bar.showMessage(f"Checked {count} visible READ-ONLY script(s)", 2500)
+
+    def _shortcut_clear_checked(self) -> None:
+        """Clears all checked scripts across all categories."""
+        self.catalog_view.clear_checked_scripts()
+        self.status_bar.showMessage("Cleared all checked scripts", 2500)
+
+    def _on_param_values_changed(self, values: dict[str, Any]) -> None:
+        """Remembers edited parameters per script so batch operations use customized values."""
+        if self._current_script:
+            self._saved_params[self._current_script.relative_path] = dict(values)
+
+    def _get_effective_params(self, script: ScriptRecord) -> dict[str, Any]:
+        """Returns active form values for the selected script, saved edits, or defaults."""
+        if (
+            self._current_script
+            and script.relative_path == self._current_script.relative_path
+        ):
+            return self.param_form.get_parameter_values()
+        if script.relative_path in self._saved_params:
+            return dict(self._saved_params[script.relative_path])
+        return {
+            p["name"]: p.get("default")
+            for p in (script.params or [])
+            if p.get("name")
+        }
+
+    def _on_checked_scripts_changed(self, checked: list[ScriptRecord]) -> None:
+        """Updates Action Bar button labels dynamically when scripts are checked."""
+        count = len(checked)
+        if count == 0:
+            self.copy_raw_btn.setText("📋 Copy Raw Script")
+            self.copy_rmm_btn.setText("⚡ Copy RMM-Ready Script")
+            self.run_local_btn.setText("▶ Test Locally on My PC")
+        else:
+            suffix = f"({count} Script)" if count == 1 else f"({count} Scripts)"
+            self.copy_raw_btn.setText(f"📋 Copy Raw {suffix}")
+            self.copy_rmm_btn.setText(f"⚡ Copy RMM-Ready {suffix}")
+            self.run_local_btn.setText(f"▶ Run {count} Checked Locally")
 
     def _shortcut_stop_execution(self) -> None:
         """Stops an active local execution via shortcut."""
@@ -452,6 +543,8 @@ class LauncherView(QMainWindow):
         total_scripts = sum(c["count"] for c in categories)
 
         self.sidebar.update_categories(categories, total_scripts)
+        valid_paths = {s.relative_path for s in self.repo.get_all_scripts()}
+        self.catalog_view.prune_checked_scripts(valid_paths)
         self._on_filters_changed(
             self.sidebar._current_category,
             self.sidebar.search_input.text(),
@@ -503,8 +596,10 @@ class LauncherView(QMainWindow):
         # Update active script context for reporting
         self.console_view.set_script_context(script.title, script.category)
 
-        # Load parameters form
+        # Load parameters form and restore any edited parameter values for this script
         self.param_form.load_script(script)
+        if script.relative_path in self._saved_params:
+            self.param_form.set_parameter_values(self._saved_params[script.relative_path])
 
         # Load Script Source Code into Preview tab
         try:
@@ -519,54 +614,154 @@ class LauncherView(QMainWindow):
             self.console_view.display_history(history)
 
     def _on_copy_raw_clicked(self) -> None:
-        if not self._current_script:
-            return
+        checked = self.catalog_view.get_checked_scripts()
         try:
-            self.clipboard_service.copy_raw_script(self._current_script.relative_path)
-            self.status_bar.showMessage("📋 Copied Raw Script to Windows Clipboard!", 4000)
+            if len(checked) >= 2:
+                items = [(s.title, s.relative_path) for s in checked]
+                self.clipboard_service.copy_raw_scripts(items)
+                self.status_bar.showMessage(
+                    f"📋 Copied {len(checked)} Raw Scripts as a combined PowerShell bundle!",
+                    4000,
+                )
+            elif len(checked) == 1:
+                self.clipboard_service.copy_raw_script(checked[0].relative_path)
+                self.status_bar.showMessage(
+                    f"📋 Copied Raw Script '{checked[0].title}' to Windows Clipboard!",
+                    4000,
+                )
+            elif self._current_script:
+                self.clipboard_service.copy_raw_script(self._current_script.relative_path)
+                self.status_bar.showMessage(
+                    "📋 Copied Raw Script to Windows Clipboard!", 4000
+                )
         except Exception as e:
             QMessageBox.critical(self, "Copy Failed", f"Failed to copy raw script: {e}")
 
     def _on_copy_rmm_clicked(self) -> None:
-        if not self._current_script:
-            return
+        checked = self.catalog_view.get_checked_scripts()
         try:
-            params = self.param_form.get_parameter_values()
-            self.clipboard_service.copy_rmm_ready_script(
-                self._current_script.relative_path, params
-            )
-            self.status_bar.showMessage("⚡ Copied RMM-Ready Script (with injected parameters) to Clipboard!", 4000)
+            if len(checked) >= 2:
+                items = [
+                    (s.title, s.relative_path, self._get_effective_params(s))
+                    for s in checked
+                ]
+                self.clipboard_service.copy_rmm_ready_scripts(items)
+                self.status_bar.showMessage(
+                    f"⚡ Copied {len(checked)} RMM-Ready Scripts (with injected parameters) as a combined bundle!",
+                    4000,
+                )
+            elif len(checked) == 1:
+                params = self._get_effective_params(checked[0])
+                self.clipboard_service.copy_rmm_ready_script(
+                    checked[0].relative_path, params
+                )
+                self.status_bar.showMessage(
+                    f"⚡ Copied RMM-Ready Script '{checked[0].title}' (with injected parameters) to Clipboard!",
+                    4000,
+                )
+            elif self._current_script:
+                params = self.param_form.get_parameter_values()
+                self.clipboard_service.copy_rmm_ready_script(
+                    self._current_script.relative_path, params
+                )
+                self.status_bar.showMessage(
+                    "⚡ Copied RMM-Ready Script (with injected parameters) to Clipboard!",
+                    4000,
+                )
         except Exception as e:
             QMessageBox.critical(self, "Copy Failed", f"Failed to copy RMM-ready script: {e}")
 
     def _on_run_local_clicked(self) -> None:
-        if not self._current_script:
+        checked = self.catalog_view.get_checked_scripts()
+        targets = checked if checked else ([self._current_script] if self._current_script else [])
+        if not targets:
             return
 
-        # Remediation safety confirmation gate
-        if self._current_script.risk_level == "remediation":
+        if len(targets) == 1:
+            target = targets[0]
+            # Remediation safety confirmation gate
+            if target.risk_level == "remediation":
+                confirm = QMessageBox.warning(
+                    self,
+                    "Remediation Script Confirmation",
+                    f"'{target.title}' is marked as REMEDIATION and will alter system state on this PC.\n\n"
+                    "Are you sure you want to test this script locally?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if confirm != QMessageBox.StandardButton.Yes:
+                    return
+
+            # Elevation pre-flight check
+            if target.requires_admin and not is_running_as_admin():
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Administrator Privileges Required")
+                msg_box.setIcon(QMessageBox.Icon.Warning)
+                msg_box.setText(
+                    f"'{target.title}' requires Administrator privileges, but PowerShellStore is currently running un-elevated.\n\n"
+                    "How would you like to execute this test?"
+                )
+                elevated_btn = msg_box.addButton(
+                    "🛡️ Run Elevated (UAC Prompt)", QMessageBox.ButtonRole.AcceptRole
+                )
+                msg_box.addButton(
+                    "Run Un-elevated (May Fail)", QMessageBox.ButtonRole.ActionRole
+                )
+                cancel_btn = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+                msg_box.setDefaultButton(elevated_btn)
+
+                msg_box.exec()
+                clicked_btn = msg_box.clickedButton()
+
+                if clicked_btn == cancel_btn:
+                    return
+                elif clicked_btn == elevated_btn:
+                    params = self._get_effective_params(target)
+                    self.runner.execute_script_elevated(target, params)
+                    self.status_bar.showMessage(
+                        "Launched in elevated PowerShell session (UAC)", 5000
+                    )
+                    return
+
+            params = self._get_effective_params(target)
+            self.console_view.clear_raw_output()
+            self.runner.execute_script(target, params)
+            return
+
+        # Batch mode (2+ scripts checked)
+        remediations = [s for s in targets if s.risk_level == "remediation"]
+        if remediations:
+            rem_list = "\n".join(f"• {s.title}" for s in remediations)
             confirm = QMessageBox.warning(
                 self,
-                "Remediation Script Confirmation",
-                f"'{self._current_script.title}' is marked as REMEDIATION and will alter system state on this PC.\n\n"
-                "Are you sure you want to test this script locally?",
+                "Batch Remediation Confirmation",
+                f"{len(remediations)} of the {len(targets)} checked scripts are marked as REMEDIATION and will alter system state on this PC:\n\n"
+                f"{rem_list}\n\n"
+                f"Are you sure you want to run all {len(targets)} checked scripts locally?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if confirm != QMessageBox.StandardButton.Yes:
                 return
 
-        # Elevation pre-flight check
-        if self._current_script.requires_admin and not is_running_as_admin():
+        batch_items = [(s, self._get_effective_params(s)) for s in targets]
+        admin_scripts = [s for s in targets if s.requires_admin]
+        if admin_scripts and not is_running_as_admin():
+            admin_list = "\n".join(f"• {s.title}" for s in admin_scripts)
             msg_box = QMessageBox(self)
             msg_box.setWindowTitle("Administrator Privileges Required")
             msg_box.setIcon(QMessageBox.Icon.Warning)
             msg_box.setText(
-                f"'{self._current_script.title}' requires Administrator privileges, but PowerShellStore is currently running un-elevated.\n\n"
-                "How would you like to execute this test?"
+                f"{len(admin_scripts)} checked script(s) require Administrator privileges, but PowerShellStore is running un-elevated:\n\n"
+                f"{admin_list}\n\n"
+                "How would you like to execute this batch?"
             )
-            elevated_btn = msg_box.addButton("🛡️ Run Elevated (UAC Prompt)", QMessageBox.ButtonRole.AcceptRole)
-            unelevated_btn = msg_box.addButton("Run Un-elevated (May Fail)", QMessageBox.ButtonRole.ActionRole)
+            elevated_btn = msg_box.addButton(
+                "🛡️ Run All Elevated (Single UAC Prompt)", QMessageBox.ButtonRole.AcceptRole
+            )
+            msg_box.addButton(
+                "Run Un-elevated (May Fail)", QMessageBox.ButtonRole.ActionRole
+            )
             cancel_btn = msg_box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
             msg_box.setDefaultButton(elevated_btn)
 
@@ -576,27 +771,36 @@ class LauncherView(QMainWindow):
             if clicked_btn == cancel_btn:
                 return
             elif clicked_btn == elevated_btn:
-                params = self.param_form.get_parameter_values()
-                self.runner.execute_script_elevated(self._current_script, params)
-                self.status_bar.showMessage("Launched in elevated PowerShell session (UAC)", 5000)
+                self.runner.execute_batch_elevated(batch_items)
+                self.status_bar.showMessage(
+                    f"Launched {len(batch_items)} scripts in elevated PowerShell session (UAC)",
+                    5000,
+                )
                 return
 
-        params = self.param_form.get_parameter_values()
         self.console_view.clear_raw_output()
-        self.runner.execute_script(self._current_script, params)
+        self.runner.execute_batch(batch_items)
 
     def _on_run_started(self) -> None:
-        self.status_bar.showMessage(f"Executing '{self._current_script.title if self._current_script else ''}'...")
+        if not self.runner._batch_active:
+            self.status_bar.showMessage(
+                f"Executing '{self._current_script.title if self._current_script else ''}'..."
+            )
         self.run_local_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+
+    def _on_batch_progress(self, step: int, total: int, script: ScriptRecord) -> None:
+        self.status_bar.showMessage(f"Batch [{step}/{total}]: Executing '{script.title}'...")
 
     def _on_run_finished(self, result: RunResult) -> None:
         self.run_local_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.console_view.display_run_result(
             result,
-            script_title=self._current_script.title if self._current_script else "",
-            script_category=self._current_script.category if self._current_script else "",
+            script_title=result.script_title
+            or (self._current_script.title if self._current_script else ""),
+            script_category=result.script_category
+            or (self._current_script.category if self._current_script else ""),
         )
 
         # Refresh history tab

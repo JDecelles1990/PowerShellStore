@@ -9,6 +9,7 @@ A Windows-focused **PySide6** desktop workstation built for IT helpdesk and Mana
 ## 🚀 Key Features
 
 - **38 Ready-to-Use Scripts Across 6 Categories:** Production-ready diagnostics and remediations for `System`, `Network`, `M365`, `Devices`, `Security_Defender`, and `Custom` workflows.
+- **Multi-Script Checkboxes & Clickable Sorting:** Click column headers (`Title`, `Risk Level`, `Admin`) to sort alphanumerically or by risk/admin flags, and check multiple scripts across categories/filters (including one-click **Read-Only** selection) to copy combined PowerShell 5.1 bundles (Raw or RMM-Ready with per-script customized parameters) or execute sequentially locally / in one UAC-elevated session.
 - **File-First Architecture with Live Sync:** Real `.ps1` files under `scripts/` are the single source of truth. [`ScriptScanner`](services/scanner.py) parses embedded `.PSSTORE_META` JSON headers, computes SHA-256 hashes, and indexes scripts into SQLite (`data/powershell_store.db`) automatically via `QFileSystemWatcher`.
 - **Dynamic Parameter Forms:** Generates typed UI controls (`string`, `int` with bounds, `bool`) directly from each script's `.PSSTORE_META.params` schema.
 - **Dual-Mode Windows Clipboard (`services/clipboard_service.py`):**
@@ -47,6 +48,7 @@ PowerShellStore/
 ├── requirements.txt             # Python dependencies (PySide6, shiboken6, pytest)
 ├── GEMINI.md                    # Workspace AI & architectural contract instructions
 ├── RULES.md                     # Architectural rules & PowerShell script contract
+├── SKILLS.md                    # Script authoring & batch scripting contract guide
 ├── data/                        # Local SQLite database (powershell_store.db, gitignored)
 ├── repositories/
 │   └── catalog_repo.py          # SQLite schema, parameterized CRUD, and run_history persistence
@@ -74,7 +76,7 @@ PowerShellStore/
 │   └── 99_Custom/               # 1 script
 ├── tools/
 │   └── lint_scripts.py          # Static & PowerShell 5.1 AST contract linter CLI
-└── tests/                       # Automated pytest suite (38 tests across all layers)
+└── tests/                       # Automated pytest suite (46 tests across all layers)
 ```
 
 ---
@@ -115,7 +117,7 @@ pythonw main.py --startup
 
 ### Verification Commands
 ```powershell
-# Run the full automated test suite (38 tests)
+# Run the full automated test suite (46 tests)
 python -m pytest tests/ -v
 
 # Lint all PowerShell scripts against the .PSSTORE_META and PS 5.1 AST contract
@@ -137,9 +139,13 @@ PowerShellStore includes global and workstation keyboard shortcuts for fast tria
 | Shortcut | Scope | Action / Function | Behavior & Notes |
 | :--- | :--- | :--- | :--- |
 | `Ctrl+B` | In-App | **Toggle Sidebar** (`toggle_sidebar`) | Collapses or expands the left Categories & Filters sidebar to maximize catalog/workstation width. |
+| `Ctrl+O` | In-App | **Open Scripts Folder** (`open_scripts_folder`) | Opens the local `scripts/` catalog directory in Windows File Explorer to browse, add, or edit `.ps1` files. |
 | `Ctrl+F` | In-App | **Focus Search Box** (`_focus_search_input`) | Automatically expands the sidebar if collapsed, focuses the search input, and selects existing query text. |
 | `F5` | In-App | **Sync Catalog** (`sync_and_refresh`) | Rescans all `scripts/` subfolders, updates SHA-256 checksums in SQLite, and refreshes counts. |
 | `Esc` | In-App | **Stop / Clear Search** (`_handle_escape`) | Context-aware: stops the active script if currently running; otherwise clears any active search filter and returns focus to the catalog table. |
+| `Ctrl+Shift+A` | In-App | **Check Visible Scripts** (`_shortcut_check_all_visible`) | Checks all scripts currently shown in the Script Catalog table for batch copy or execution. |
+| `Ctrl+Shift+O` | In-App | **Check Read-Only Scripts** (`_shortcut_check_read_only_visible`) | Checks all visible `read_only` scripts in the Script Catalog table while leaving remediation scripts unchecked. |
+| `Ctrl+Shift+D` | In-App | **Clear Checked Scripts** (`_shortcut_clear_checked`) | Unchecks all selected scripts across all categories. |
 
 ### Script Actions & Parameters
 | Shortcut | Scope | Action / Function | Behavior & Notes |
@@ -239,9 +245,9 @@ All **38** built-in scripts target Windows PowerShell 5.1 (`Desktop`) for maximu
 
 ---
 
-## 📜 Authoring New Scripts (`.PSSTORE_META` Contract)
+## 📜 Authoring New Scripts (`.PSSTORE_META` & Batch Contract)
 
-Drop any `.ps1` file into a folder under `scripts/` and PowerShellStore indexes it automatically. Every script must follow the contract in `RULES.md`:
+Drop any `.ps1` file into a folder under `scripts/` and PowerShellStore indexes it automatically. Every script must follow the architectural contract in `RULES.md` and the full **Batch Scripting & Authoring Guide** in [`SKILLS.md`](SKILLS.md):
 
 ```powershell
 <#

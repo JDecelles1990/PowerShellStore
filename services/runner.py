@@ -64,6 +64,8 @@ class ScriptRunner(QObject):
     output_received = Signal(str)
     finished = Signal(RunResult)
     error_occurred = Signal(str)
+    batch_progress = Signal(int, int, object)  # current_step_1based, total_steps, ScriptRecord
+    batch_finished = Signal(object)  # consolidated RunResult
 
     def __init__(
         self,
@@ -84,9 +86,20 @@ class ScriptRunner(QObject):
         self._stderr_chunks: list[str] = []
         self._is_timed_out: bool = False
 
+        # Batch execution state
+        self._batch_active: bool = False
+        self._batch_queue: list[tuple[ScriptRecord, dict[str, Any]]] = []
+        self._batch_total: int = 0
+        self._batch_index: int = 0
+        self._batch_results: list[RunResult] = []
+        self._batch_cancelled: bool = False
+        self._batch_start_time: float = 0.0
+
     @property
     def is_running(self) -> bool:
-        return self._process is not None and self._process.state() != QProcess.ProcessState.NotRunning
+        return self._batch_active or (
+            self._process is not None and self._process.state() != QProcess.ProcessState.NotRunning
+        )
 
     def _select_executable(self, ps_edition: str) -> str:
         """Selects pwsh.exe for Core if available, otherwise powershell.exe."""
@@ -111,10 +124,77 @@ class ScriptRunner(QObject):
             self.error_occurred.emit("A script is already running.")
             return False
 
+        return self._start_single_process(script, param_values, emit_started=True)
+
+    def execute_batch(
+        self,
+        items: list[tuple[ScriptRecord, dict[str, Any]]],
+    ) -> bool:
+        """Executes multiple PowerShell scripts sequentially using QProcess."""
+        if self.is_running:
+            self.error_occurred.emit("A script or batch is already running.")
+            return False
+
+        if not items:
+            return False
+
+        if len(items) == 1:
+            return self.execute_script(items[0][0], items[0][1])
+
+        self._batch_active = True
+        self._batch_queue = list(items)
+        self._batch_total = len(items)
+        self._batch_index = 0
+        self._batch_results = []
+        self._batch_cancelled = False
+        self._batch_start_time = time.time()
+
+        self.started.emit()
+        self._run_next_in_batch()
+        return True
+
+    def _run_next_in_batch(self) -> None:
+        if self._batch_cancelled or not self._batch_queue:
+            self._finalize_batch()
+            return
+
+        script, params = self._batch_queue.pop(0)
+        self._batch_index += 1
+        self.batch_progress.emit(self._batch_index, self._batch_total, script)
+        self.output_received.emit(
+            f"\n===== [{self._batch_index}/{self._batch_total}] {script.title} =====\n"
+        )
+
+        started = self._start_single_process(script, params, emit_started=False)
+        if not started:
+            err_msg = f"Script file not found: {self.scripts_dir / script.relative_path}"
+            self.output_received.emit(f"[ERROR] {err_msg}\n")
+            self._batch_results.append(
+                RunResult(
+                    script_id=script.id or 0,
+                    duration_ms=0,
+                    exit_code=1,
+                    status="error",
+                    summary=err_msg,
+                    errors=[err_msg],
+                    raw_output=err_msg,
+                    script_title=script.title,
+                    script_category=script.category,
+                )
+            )
+            QTimer.singleShot(0, self._run_next_in_batch)
+
+    def _start_single_process(
+        self,
+        script: ScriptRecord,
+        param_values: dict[str, Any] | None = None,
+        emit_started: bool = True,
+    ) -> bool:
         script_file = self.scripts_dir / script.relative_path
         if not script_file.exists():
             msg = f"Script file not found: {script_file}"
-            self.error_occurred.emit(msg)
+            if emit_started:
+                self.error_occurred.emit(msg)
             return False
 
         # Validate SHA-256 checksum
@@ -170,19 +250,26 @@ class ScriptRunner(QObject):
         self._timer.timeout.connect(self._on_timeout)
 
         self._start_time = time.time()
-        self.started.emit()
+        if emit_started:
+            self.started.emit()
         self._timer.start(timeout_sec * 1000)
         self._process.start(executable, cli_args)
 
         return True
 
     def stop_execution(self) -> None:
-        """Terminates the currently running script process."""
+        """Terminates the currently running script or batch execution."""
+        if self._batch_active:
+            self._batch_cancelled = True
+            self._batch_queue.clear()
+
         if self._timer and self._timer.isActive():
             self._timer.stop()
 
         if self._process and self._process.state() != QProcess.ProcessState.NotRunning:
             self._process.kill()
+        elif self._batch_active:
+            self._finalize_batch()
 
     def _on_stdout_ready(self) -> None:
         if not self._process:
@@ -350,7 +437,146 @@ class ScriptRunner(QObject):
             except Exception as e:
                 logger.error("Failed to log run history: %s", e)
 
-        self.finished.emit(result)
+        if self._batch_active:
+            self._batch_results.append(result)
+            if not self._batch_cancelled and self._batch_queue:
+                QTimer.singleShot(0, self._run_next_in_batch)
+            else:
+                self._finalize_batch()
+        else:
+            self.finished.emit(result)
+
+    def _finalize_batch(self) -> None:
+        if not self._batch_active:
+            return
+        self._batch_active = False
+
+        duration_ms = int((time.time() - self._batch_start_time) * 1000)
+        results = list(self._batch_results)
+        total = self._batch_total
+
+        passed = sum(1 for r in results if r.status.lower() == "pass")
+        warnings = sum(1 for r in results if r.status.lower() == "warning")
+        failed = sum(1 for r in results if r.status.lower() in ("fail", "error", "timeout"))
+
+        if failed > 0:
+            batch_status = "error"
+        elif self._batch_cancelled or warnings > 0:
+            batch_status = "warning"
+        else:
+            batch_status = "pass"
+
+        batch_exit_code = (
+            0 if not self._batch_cancelled and all(r.exit_code == 0 for r in results) else 1
+        )
+        if self._batch_cancelled:
+            batch_summary = f"Batch stopped by user after {len(results)}/{total} script(s)."
+        else:
+            batch_summary = (
+                f"Batch finished: {passed}/{total} passed, "
+                f"{warnings} warning(s), {failed} failed."
+            )
+
+        rows = [
+            {
+                "Step": f"{idx}/{total}",
+                "Script": r.script_title,
+                "Category": r.script_category,
+                "Status": r.status.upper(),
+                "ExitCode": r.exit_code,
+                "DurationMs": r.duration_ms,
+                "Summary": r.summary,
+            }
+            for idx, r in enumerate(results, start=1)
+        ]
+
+        all_errors = [
+            f"[{r.script_title}] {err}" for r in results for err in r.errors
+        ]
+        if self._batch_cancelled:
+            all_errors.append("Batch execution was cancelled by user.")
+
+        combined_raw = "\n\n".join(
+            f"===== [{idx}/{total}] {r.script_title} ({r.status.upper()}) =====\n{r.raw_output}"
+            for idx, r in enumerate(results, start=1)
+        )
+
+        batch_result = RunResult(
+            script_id=0,
+            duration_ms=duration_ms,
+            exit_code=batch_exit_code,
+            status=batch_status,
+            summary=batch_summary,
+            data=rows,
+            errors=all_errors,
+            raw_output=combined_raw,
+            raw_json="",
+            script_title=f"Batch Execution ({len(results)}/{total} Scripts)",
+            script_category="Batch",
+        )
+        self.batch_finished.emit(batch_result)
+        self.finished.emit(batch_result)
+
+    def execute_batch_elevated(
+        self,
+        items: list[tuple[ScriptRecord, dict[str, Any]]],
+    ) -> bool:
+        """Spawns a single UAC-elevated PowerShell session executing multiple scripts sequentially."""
+        if not items:
+            return False
+        if len(items) == 1:
+            return self.execute_script_elevated(items[0][0], items[0][1])
+
+        total = len(items)
+        cmd_parts: list[str] = [
+            "Write-Host '===================================================' -ForegroundColor Cyan",
+            f"Write-Host ' PowerShellStore — Elevated Batch Runner ({total} Scripts)' -ForegroundColor Cyan",
+            "Write-Host '===================================================' -ForegroundColor Cyan",
+            "Write-Host ''",
+        ]
+
+        for idx, (script, param_values) in enumerate(items, start=1):
+            script_file = self.scripts_dir / script.relative_path
+            if not script_file.exists():
+                self.error_occurred.emit(f"Script file not found: {script_file}")
+                return False
+
+            resolved_script = str(script_file.resolve()).replace("'", "''")
+            safe_title = script.title.replace("'", "''")
+            arg_str = " ".join(build_powershell_args(param_values or {}))
+            invoke_line = f"& '{resolved_script}' {arg_str}".strip()
+
+            cmd_parts.extend(
+                [
+                    f"Write-Host '--- [{idx}/{total}] {safe_title} ---' -ForegroundColor Yellow",
+                    invoke_line,
+                    "Write-Host ''",
+                ]
+            )
+
+        cmd_parts.extend(
+            [
+                "Write-Host '---------------------------------------------------' -ForegroundColor DarkGray",
+                "Write-Host 'Batch complete. Press Enter to close window...' -ForegroundColor Yellow",
+                "[void][System.Console]::ReadLine()",
+            ]
+        )
+        ps_command = "; ".join(cmd_parts)
+
+        try:
+            ret = ctypes.windll.shell32.ShellExecuteW(
+                None,
+                "runas",
+                "powershell.exe",
+                f"-NoProfile -ExecutionPolicy Bypass -Command \"{ps_command}\"",
+                None,
+                1,  # SW_SHOWNORMAL
+            )
+            return ret > 32
+        except Exception as e:
+            logger.error("Failed to spawn elevated batch runner: %s", e)
+            self.error_occurred.emit(f"Failed to launch elevated batch session: {e}")
+            return False
 
     def execute_script_elevated(
         self,

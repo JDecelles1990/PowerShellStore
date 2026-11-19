@@ -70,6 +70,54 @@ def inject_parameters(script_content: str, param_values: dict[str, Any]) -> str:
     return script_content[:start] + modified_block + script_content[end:]
 
 
+def combine_scripts_bundle(
+    items: list[tuple[str, str, str]],
+    mode_label: str = "RMM-Ready",
+) -> str:
+    """
+    Combines multiple scripts into a single standalone PowerShell 5.1 script bundle.
+    Each script is wrapped in an isolated scriptblock (& { ... }) inside try/catch so
+    [CmdletBinding()] param(...) headers remain valid and variables stay scoped.
+    """
+    if not items:
+        return ""
+    if len(items) == 1:
+        return items[0][2]
+
+    total = len(items)
+    sections = [
+        "# ==============================================================================",
+        f"# PowerShellStore — Combined Multi-Script Bundle ({total} scripts)",
+        f"# Mode: {mode_label}",
+        "# ==============================================================================",
+        "",
+    ]
+
+    for idx, (title, relative_path, script_content) in enumerate(items, start=1):
+        safe_title = title.replace("'", "''")
+        body = script_content.lstrip("\ufeff").rstrip()
+        sections.extend(
+            [
+                "# ------------------------------------------------------------------------------",
+                f"# [{idx}/{total}] {title} ({relative_path})",
+                "# ------------------------------------------------------------------------------",
+                "Write-Output ''",
+                f"Write-Output '===== [{idx}/{total}] {safe_title} ====='",
+                "try {",
+                "& {",
+                body,
+                "}",
+                "}",
+                "catch {",
+                f"    Write-Error ('[ERROR] Script {safe_title} failed: ' + $_.Exception.Message)",
+                "}",
+                "",
+            ]
+        )
+
+    return "\n".join(sections).rstrip() + "\n"
+
+
 class ClipboardService:
     def __init__(self, scripts_dir: Path | str | None = None) -> None:
         if scripts_dir is None:
@@ -140,4 +188,37 @@ class ClipboardService:
         """Generates RMM-ready script with injected parameters and copies to clipboard."""
         content = self.get_rmm_ready_script(relative_path, param_values)
         self.copy_to_clipboard(content)
+        return content
+
+    def get_combined_raw_scripts(self, scripts: list[tuple[str, str]]) -> str:
+        """Reads multiple raw scripts from disk and bundles them into one script."""
+        items = [(title, rel_path, self.get_raw_script(rel_path)) for title, rel_path in scripts]
+        return combine_scripts_bundle(items, mode_label="Raw")
+
+    def copy_raw_scripts(self, scripts: list[tuple[str, str]]) -> str:
+        """Builds a combined raw bundle for multiple scripts and copies it to clipboard."""
+        content = self.get_combined_raw_scripts(scripts)
+        if content:
+            self.copy_to_clipboard(content)
+        return content
+
+    def get_combined_rmm_ready_scripts(
+        self, scripts: list[tuple[str, str, dict[str, Any]]]
+    ) -> str:
+        """Injects per-script parameters and bundles multiple scripts for RMM deployment."""
+        items = [
+            (title, rel_path, self.get_rmm_ready_script(rel_path, params))
+            for title, rel_path, params in scripts
+        ]
+        return combine_scripts_bundle(
+            items, mode_label="RMM-Ready (With Injected Parameters)"
+        )
+
+    def copy_rmm_ready_scripts(
+        self, scripts: list[tuple[str, str, dict[str, Any]]]
+    ) -> str:
+        """Builds a combined RMM-ready bundle and copies it to the Windows Clipboard."""
+        content = self.get_combined_rmm_ready_scripts(scripts)
+        if content:
+            self.copy_to_clipboard(content)
         return content

@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
+from PySide6.QtCore import QUrl
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import QApplication
 import pytest
@@ -92,9 +93,13 @@ def launcher_window(qapp, tmp_path: Path):
 def test_all_shortcuts_registered_without_duplicates(launcher_window: LauncherView):
     expected_shortcuts = {
         "toggle_sidebar",
+        "open_scripts_folder",
         "focus_search",
         "sync_catalog",
         "escape_action",
+        "check_all_visible",
+        "check_read_only_visible",
+        "clear_checked_scripts",
         "copy_raw_script",
         "copy_rmm_script",
         "run_local",
@@ -258,6 +263,10 @@ def test_ui_tooltips_advertise_shortcuts(launcher_window: LauncherView):
     assert "Shift+F5" in launcher_window.stop_btn.toolTip()
     assert "Ctrl+=" in launcher_window.opacity_slider.toolTip()
     assert "Ctrl+B" in launcher_window.catalog_view.toggle_sidebar_btn.toolTip()
+    assert "Ctrl+O" in launcher_window.catalog_view.open_folder_btn.toolTip()
+    assert "Ctrl+Shift+A" in launcher_window.catalog_view.check_all_btn.toolTip()
+    assert "Ctrl+Shift+O" in launcher_window.catalog_view.check_readonly_btn.toolTip()
+    assert "Ctrl+Shift+D" in launcher_window.catalog_view.clear_checked_btn.toolTip()
     assert "Ctrl+F" in launcher_window.sidebar.search_input.placeholderText()
     assert "F5" in launcher_window.sidebar.sync_button.toolTip()
     assert "Ctrl+Alt+R" in launcher_window.param_form.reset_btn.toolTip()
@@ -284,9 +293,13 @@ def test_rules_and_readme_document_all_shortcuts_and_scripts():
     required_shortcuts = [
         "Win+F8",
         "Ctrl+B",
+        "Ctrl+O",
         "Ctrl+F",
         "F5",
         "Esc",
+        "Ctrl+Shift+A",
+        "Ctrl+Shift+O",
+        "Ctrl+Shift+D",
         "Ctrl+Shift+C",
         "Ctrl+Shift+R",
         "Ctrl+Enter",
@@ -314,3 +327,20 @@ def test_rules_and_readme_document_all_shortcuts_and_scripts():
     assert len(ps1_files) == 38
     for ps1_path in ps1_files:
         assert ps1_path.name in readme_text, f"Script '{ps1_path.name}' missing from README.md"
+
+
+def test_open_scripts_folder_button_and_shortcut(launcher_window: LauncherView):
+    expected_url = QUrl.fromLocalFile(str(launcher_window.scanner.scripts_dir.resolve()))
+
+    with patch("ui.launcher_view.QDesktopServices.openUrl", return_value=True) as mock_open:
+        launcher_window.catalog_view.open_folder_btn.click()
+        mock_open.assert_called_once_with(expected_url)
+
+        mock_open.reset_mock()
+        launcher_window.shortcuts["open_scripts_folder"].activated.emit()
+        mock_open.assert_called_once_with(expected_url)
+
+    with patch("ui.launcher_view.QDesktopServices.openUrl", return_value=False), \
+         patch("ui.launcher_view.QMessageBox.warning") as mock_warn:
+        launcher_window.open_scripts_folder()
+        mock_warn.assert_called_once()
