@@ -41,6 +41,7 @@ from services.report_service import ReportService
 from services.runner import RunResult, ScriptRunner, is_running_as_admin
 from services.scanner import ScriptScanner
 from services.startup_service import StartupService
+from ui.backdrop_fx import install_backdrop_fx
 from ui.catalog_table_view import CatalogTableView
 from ui.console_view import ConsoleView
 from ui.effects import install_item_view_glow_recursive
@@ -95,6 +96,8 @@ class LauncherView(QMainWindow):
         self._init_ui()
         # Glowing gradient hover + click ripple on list/table rows (categories, catalog, history, results)
         self.item_view_glow = install_item_view_glow_recursive(self)
+        # Dynamic cyber-aurora backdrop & interactive frosted glass overlays across panes
+        self.backdrop_fx = install_backdrop_fx(self)
         self._init_shortcuts()
         self._init_tray_icon()
         self._init_watcher()
@@ -108,6 +111,7 @@ class LauncherView(QMainWindow):
 
     def _init_ui(self) -> None:
         central_widget = QWidget()
+        central_widget.setObjectName("CentralBackdrop")
         self.setCentralWidget(central_widget)
         root_layout = QVBoxLayout(central_widget)
         root_layout.setContentsMargins(10, 10, 10, 10)

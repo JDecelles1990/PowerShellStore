@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from ui.effects import install_button_fx
 from ui.launcher_view import LauncherView
 from ui.styles import DARK_THEME_QSS
+from ui.tooltip_fx import install_tooltip_fx
 
 # Configure basic logging
 logging.basicConfig(
@@ -36,6 +37,9 @@ def main() -> None:
 
     # Rainbow glow, shine sweep and click ripple on every push button (incl. dialogs)
     install_button_fx(app)
+
+    # Dynamic rainbow text + shining colorful animated tooltips globally
+    install_tooltip_fx(app)
 
     # Detect startup / background launch arguments
     start_hidden = any(arg in sys.argv for arg in ("--startup", "--minimized", "--tray"))

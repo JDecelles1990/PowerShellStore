@@ -28,8 +28,9 @@ A Windows-focused **PySide6** desktop workstation built for IT helpdesk and Mana
   - **Start with Windows (`services/startup_service.py`):** Toggle launch-on-login via `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` using silent `pythonw.exe main.py --startup` tray startup.
   - **System Tray (`QSystemTrayIcon`):** Minimize-to-tray on close, toggle visibility, toggle startup setting, or quit cleanly.
 - **Modern Dark Workstation UI (`ui/`):**
+  - Dynamic midnight cyber-aurora & cobalt prism gradient backdrop with cursor-reactive frosted glass panels and illuminated glass border rims (`ui/backdrop_fx.py`).
   - 3-pane layout with collapsible sidebar (`Ctrl+B`), resizable tables, and a **60%–100% window opacity slider**.
-  - Animated hover gradient, rainbow glow halo, diagonal shine sweep, and click ripple effects across push buttons and list/table rows (`ui/effects.py`, `ui/styles.py`).
+  - Animated hover gradient, rainbow glow halo, diagonal shine sweep, and click ripple effects across push buttons and list/table rows (`ui/effects.py`, `ui/styles.py`), plus animated dynamic-rainbow hover tooltips with shining aurora backgrounds (`ui/tooltip_fx.py`).
 - **Built-In Static & AST Contract Linter (`tools/lint_scripts.py`):** Validates every `.ps1` script against `.PSSTORE_META`, PowerShell 5.1 syntax (`Parser::ParseFile`), `try/catch/finally` error handling, parameter usage, and dual table/JSON output rules.
 
 ---
@@ -65,8 +66,10 @@ PowerShellStore/
 │   ├── catalog_table_view.py    # Script catalog table with Risk & Admin status indicators
 │   ├── parameter_form.py        # Dynamic typed parameter inputs generated from .PSSTORE_META
 │   ├── console_view.py          # Tabbed output: Structured Results, Raw Console, Source, Run History
-│   ├── styles.py                # Dark theme QSS stylesheet + gradient button states
-│   └── effects.py               # Animated button glow/ripple & hovering list/table row delegate
+│   ├── styles.py                # Dark theme QSS stylesheet + frosted glass & gradient button states
+│   ├── backdrop_fx.py           # Dynamic cyber-aurora gradient backdrop & cursor-reactive glass overlays
+│   ├── effects.py               # Animated button glow/ripple & hovering list/table row delegate
+│   └── tooltip_fx.py            # Animated dynamic-rainbow text & shining colorful aurora tooltips
 ├── scripts/                     # Categorized PowerShell script library (source of truth)
 │   ├── 01_System/               # 11 scripts
 │   ├── 02_Network/              # 6 scripts
@@ -76,7 +79,7 @@ PowerShellStore/
 │   └── 99_Custom/               # 1 script
 ├── tools/
 │   └── lint_scripts.py          # Static & PowerShell 5.1 AST contract linter CLI
-└── tests/                       # Automated pytest suite (46 tests across all layers)
+└── tests/                       # Automated pytest suite (54 tests across all layers)
 ```
 
 ---
@@ -117,7 +120,7 @@ pythonw main.py --startup
 
 ### Verification Commands
 ```powershell
-# Run the full automated test suite (46 tests)
+# Run the full automated test suite (54 tests)
 python -m pytest tests/ -v
 
 # Lint all PowerShell scripts against the .PSSTORE_META and PS 5.1 AST contract
